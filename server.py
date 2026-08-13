@@ -344,6 +344,44 @@ def index():
     return render_template("index.html", folders=folders, files=files, path=rel_path, parent=relative_parent(rel_path), is_admin=session.get("role") == "admin", username=session.get("username"), usage_bytes=usage, quota_bytes=quota, current_sort=sort_by)
 
 
+@app.route("/search", methods=["GET"])
+def search():
+    require_login()
+    query = request.args.get("q", "").strip()
+    if not query:
+        return redirect(url_for("index"))
+        
+    base = access_base()
+    results = []
+    
+    for root, directories, files in os.walk(base, followlinks=False):
+        directories[:] = [item for item in directories if not (Path(root) / item).is_symlink()]
+        
+        for directory in directories:
+            if query.lower() in directory.lower():
+                full_path = Path(root) / directory
+                results.append({
+                    "name": directory,
+                    "rel_path": str(full_path.relative_to(base)).replace(os.sep, "/"),
+                    "rel_parent": str(full_path.parent.relative_to(base)).replace(os.sep, "/") if full_path.parent != base else "",
+                    "is_dir": True
+                })
+        
+        for filename in files:
+            if query.lower() in filename.lower():
+                full_path = Path(root) / filename
+                if not full_path.is_symlink():
+                    results.append({
+                        "name": filename,
+                        "rel_path": str(full_path.relative_to(base)).replace(os.sep, "/"),
+                        "rel_parent": str(full_path.parent.relative_to(base)).replace(os.sep, "/") if full_path.parent != base else "",
+                        "is_dir": False
+                    })
+                    
+    usage, quota = quota_information()
+    return render_template("index.html", search_query=query, results=results, is_admin=session.get("role") == "admin", username=session.get("username"), usage_bytes=usage, quota_bytes=quota)
+
+
 def authenticated_file():
     if not session.get("role"):
         return None
