@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Nexus File Manager</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <!-- Phosphor Icons -->
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+  <!-- QRCode.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body class="fm-body">
+
+<nav class="navbar animate-fade-in">
+  <h2>
+    <i class="ph-fill ph-hard-drives" style="color: var(--primary); font-size: 1.5rem;"></i>
+    Nexus / <span>{{ path if path else 'Root' }}</span>
+  </h2>
+  <a class="btn-logout" href="{{ url_for('logout') }}">
+    <i class="ph ph-sign-out"></i> Logout
+  </a>
+</nav>
+
+<div class="main-container animate-fade-in" style="animation-delay: 0.1s;">
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <ul class="flash-messages">
+      {% for category, message in messages %}
+        <li class="flash-message flash-{{ category }}">
+          {% if category == 'error' %}
+            <i class="ph ph-warning-circle"></i>
+          {% else %}
+            <i class="ph ph-check-circle"></i>
+          {% endif %}
+          {{ message }}
+        </li>
+      {% endfor %}
+      </ul>
+    {% endif %}
+  {% endwith %}
+
+  <div class="glass-panel" style="padding: 10px;">
+    <div class="file-tools">
+      <button class="action-btn tool-btn" onclick="openFolderModal()"><i class="ph ph-folder-plus"></i> New folder</button>
+      <label class="action-btn tool-btn upload-label" for="uploadFile"><i class="ph ph-upload-simple"></i> Upload file</label>
+      <input id="uploadFile" type="file" hidden onchange="uploadFile(this.files[0])">
+    </div>
+    <div id="uploadStatus" class="upload-status" aria-live="polite" hidden>
+      <div class="upload-status-row"><span id="uploadMessage">Preparing upload…</span><span id="uploadPercent">0%</span></div>
+      <div class="progress-track"><div id="uploadProgress" class="progress-bar"></div></div>
+      <span id="uploadSpeed" class="text-muted"></span>
+    </div>
+    <ul class="file-list">
+    {% if parent is not none %}
+      <li class="file-item">
+        <div class="file-info">
+          <i class="ph ph-arrow-u-up-left" style="color: var(--text-muted);"></i>
+          <a href="{{ url_for('index', path=parent) }}">.. (Go Up)</a>
+        </div>
+      </li>
+    {% endif %}
+
+    {% for f in folders %}
+      <li class="file-item">
+        <div class="file-info">
+          <i class="ph-fill ph-folder icon-folder"></i>
+          <a href="{{ url_for('index', path=(path + '/' + f) if path else f) }}">{{f}}</a>
+        </div>
+        <div class="file-actions">
+          <button class="action-btn" onclick='shareFolder({{ ((path + "/" + f) if path else f)|tojson }}, {{ f|tojson }})'>
+            <i class="ph ph-share-network"></i> Share
+          </button>
+        </div>
+      </li>
+    {% endfor %}
+
+    {% for f in files %}
+      {% set ext = f.rsplit('.', 1)[-1].lower() if '.' in f else '' %}
+      {% set is_image = ext in ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'] %}
+      <li class="file-item {% if is_image %}file-item-image{% endif %}">
+        <div class="file-info">
+          {% if is_image %}
+            <i class="ph-duotone ph-image icon-image"></i>
+          {% else %}
+            <i class="ph-duotone ph-file icon-file"></i>
+          {% endif %}
+          <span>{{f}}</span>
+        </div>
+        {% if is_image %}
+        <div class="image-preview-thumb" onclick='openPreview({{ url_for("view", path=path, file=f)|tojson }}, {{ f|tojson }})'>
+          <img src="{{ url_for('view', path=path, file=f) }}" alt="{{f}}" loading="lazy">
+        </div>
+        {% endif %}
+        <div class="file-actions">
+          {% if is_image %}
+          <button class="action-btn" onclick='openPreview({{ url_for("view", path=path, file=f)|tojson }}, {{ f|tojson }})'>
+            <i class="ph ph-eye"></i> Preview
+          </button>
+          {% else %}
+          <a class="action-btn" href="{{ url_for('view', path=path, file=f) }}" target="_blank">
+            <i class="ph ph-eye"></i> View
+          </a>
+          {% endif %}
+          <a class="action-btn" href="{{ url_for('download', path=path, file=f) }}">
+            <i class="ph ph-download-simple"></i> Download
+          </a>
+        </div>
+      </li>
+    {% endfor %}
+    </ul>
+  </div>
+
+</div>
+
+<!-- New Folder Modal -->
+<div id="folderModal" class="modal" onclick="closeFolderModal(event)">
+  <div class="modal-content glass-panel">
+    <span class="close-btn" onclick="closeFolderModal()">&times;</span>
+    <h3>New Folder</h3>
+    <input id="folderName" type="text" maxlength="255" placeholder="Folder name" autocomplete="off">
+    <button onclick="createFolder()">Create folder</button>
+  </div>
+</div>
+
+<!-- Image Preview Modal -->
+<div id="previewModal" class="modal" onclick="closePreview(event)">
+  <div class="preview-modal-content">
+    <span class="close-btn" onclick="closePreviewModal()">&times;</span>
+    <h3 id="previewFileName" class="preview-title"></h3>
+    <div class="preview-image-container">
+      <img id="previewImage" src="" alt="Preview">
+    </div>
+  </div>
+</div>
+
+<!-- Share Modal -->
+<div id="shareModal" class="modal">
+  <div class="modal-content glass-panel">
+    <span class="close-btn" onclick="closeShareModal()">&times;</span>
+    <h3>Share Folder: <span id="shareFolderName"></span></h3>
+    <p class="text-muted">Scan the QR code or copy the link below.</p>
+    
+    <div id="qrcode" class="qr-container"></div>
+    
+    <div class="link-container">
+      <input type="text" id="shareLinkInput" readonly>
+      <button class="action-btn copy-btn" onclick="copyShareLink()">
+        <i class="ph ph-copy"></i> Copy
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Image Preview
+  function openPreview(src, name) {
+    document.getElementById('previewImage').src = src;
+    document.getElementById('previewFileName').innerText = name;
+    document.getElementById('previewModal').style.display = 'flex';
+  }
+
+  function closePreviewModal() {
+    document.getElementById('previewModal').style.display = 'none';
+    document.getElementById('previewImage').src = '';
+  }
+
+  function closePreview(event) {
+    if (event.target === document.getElementById('previewModal')) {
+      closePreviewModal();
+    }
+  }
+
+  // Share
+  let qrcode = null;
+
+  async function shareFolder(path, name) {
+    try {
+      const response = await fetch('/api/share', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ path: path })
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok) {
+        document.getElementById('shareFolderName').innerText = name;
+        document.getElementById('shareLinkInput').value = data.url;
+        
+        // Generate QR
+        const qrContainer = document.getElementById('qrcode');
+        qrContainer.innerHTML = '';
+        qrcode = new QRCode(qrContainer, {
+          text: data.url,
+          width: 200,
+          height: 200,
+          colorDark : "#000000",
+          colorLight : "#ffffff",
+          correctLevel : QRCode.CorrectLevel.H
+        });
+        // QRCode JS has issues with transparent backgrounds sometimes. We'll add CSS to give it a white background just to be safe.
+        
+        // Show modal
+        document.getElementById('shareModal').style.display = 'flex';
+      } else {
+        alert("Failed to generate share link: " + data.error);
+      }
+    } catch (e) {
+      alert("Error sharing folder: " + e);
+    }
+  }
+
+  function closeShareModal() {
+    document.getElementById('shareModal').style.display = 'none';
+  }
+
+  function copyShareLink() {
+    const input = document.getElementById('shareLinkInput');
+    input.select();
+    input.setSelectionRange(0, 99999); // For mobile devices
+    navigator.clipboard.writeText(input.value);
+    
+    const btn = document.querySelector('.copy-btn');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<i class="ph ph-check"></i> Copied!';
+    setTimeout(() => {
+      btn.innerHTML = originalText;
+    }, 2000);
+  }
+
+  const currentPath = {{ path|tojson }};
+
+  function openFolderModal() {
+    document.getElementById('folderName').value = '';
+    document.getElementById('folderModal').style.display = 'flex';
+    document.getElementById('folderName').focus();
+  }
+
+  function closeFolderModal(event) {
+    if (!event || event.target === document.getElementById('folderModal')) {
+      document.getElementById('folderModal').style.display = 'none';
+    }
+  }
+
+  async function createFolder() {
+    const name = document.getElementById('folderName').value.trim();
+    const response = await fetch('/api/folder', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({path: currentPath, name})
+    });
+    const data = await response.json();
+    if (response.ok) location.reload();
+    else alert(data.error || 'Could not create folder');
+  }
+
+  function uploadFile(file) {
+    if (!file) return;
+    const status = document.getElementById('uploadStatus');
+    const message = document.getElementById('uploadMessage');
+    const percent = document.getElementById('uploadPercent');
+    const bar = document.getElementById('uploadProgress');
+    const speed = document.getElementById('uploadSpeed');
+    const input = document.getElementById('uploadFile');
+    const form = new FormData();
+    form.append('path', currentPath);
+    form.append('file', file);
+    const startedAt = performance.now();
+    status.hidden = false;
+    message.textContent = `Uploading ${file.name}`;
+    percent.textContent = '0%'; bar.style.width = '0%'; speed.textContent = ''; bar.classList.remove('progress-error');
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/upload');
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable) return;
+      const progress = Math.round(event.loaded / event.total * 100);
+      const elapsed = Math.max((performance.now() - startedAt) / 1000, 0.1);
+      const bytesPerSecond = event.loaded / elapsed;
+      const units = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+      let value = bytesPerSecond, unit = 0;
+      while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+      percent.textContent = `${progress}%`; bar.style.width = `${progress}%`;
+      speed.textContent = `${value.toFixed(value >= 100 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+    };
+    xhr.onload = () => {
+      input.value = '';
+      let data = {};
+      try { data = JSON.parse(xhr.responseText); } catch (_) {}
+      if (xhr.status >= 200 && xhr.status < 300) {
+        message.textContent = 'Upload complete'; percent.textContent = '100%'; bar.style.width = '100%';
+        setTimeout(() => location.reload(), 400);
+      } else {
+        message.textContent = data.error || 'Upload failed'; speed.textContent = ''; bar.classList.add('progress-error');
+      }
+    };
+    xhr.onerror = () => { message.textContent = 'Upload failed: network error'; speed.textContent = ''; bar.classList.add('progress-error'); };
+    xhr.send(form);
+  }
+</script>
+
+</body>
+</html>

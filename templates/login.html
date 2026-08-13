@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Nexus File Manager - Login</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <!-- Phosphor Icons -->
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+</head>
+<body class="login-body">
+  <div class="glass-panel login-card animate-fade-in">
+    <div class="login-icon">
+      <i class="ph-fill ph-fingerprint"></i>
+    </div>
+    <h2 style="margin-bottom: 24px;">Welcome Back</h2>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <ul class="flash-messages">
+        {% for category, message in messages %}
+          <li class="flash-message flash-{{ category }}">
+            {% if category == 'error' %}
+              <i class="ph ph-warning-circle"></i>
+            {% else %}
+              <i class="ph ph-check-circle"></i>
+            {% endif %}
+            {{ message }}
+          </li>
+        {% endfor %}
+        </ul>
+      {% endif %}
+    {% endwith %}
+
+    <form method="post">
+      <div style="text-align: left;">
+        <input type="text" name="username" placeholder="Username" required autocomplete="off">
+        <input type="password" name="password" placeholder="Password" required>
+      </div>
+      <button type="submit">
+        Authenticate <i class="ph ph-arrow-right" style="margin-left: 8px; vertical-align: middle;"></i>
+      </button>
+    </form>
+  </div>
+</body>
+</html>
