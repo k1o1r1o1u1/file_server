@@ -3,4 +3,5 @@
 __pycache__/
 *.pyc
 fileserver.db
-storage/
+storage/*
+!storage/.gitkeep

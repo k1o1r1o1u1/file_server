@@ -47,6 +47,14 @@ set -a; . ./.env; set +a
 .venv/bin/gunicorn --workers 1 --bind 0.0.0.0:8888 --access-logfile - --error-logfile - server:app
 ```
 
+Or use the included launcher. This is the easiest way to run it manually after
+the initial setup:
+
+```bash
+chmod +x run.sh
+./run.sh
+```
+
 On the Ubuntu server, open `http://127.0.0.1:8888` or run
 `curl -I http://127.0.0.1:8888`. It redirects to `/login` until authenticated.
 Gunicorn listens on all local interfaces: use `http://SERVER_LAN_IP:8888` from
