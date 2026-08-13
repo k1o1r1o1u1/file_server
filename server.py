@@ -492,6 +492,56 @@ def admin_users():
     return render_template("admin_users.html", users=users, user_usage=usage)
 
 
+def format_size(size):
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024 or unit == "TB":
+            return f"{size:.1f} {unit}" if unit != "B" else f"{size} B"
+        size /= 1024
+
+
+@app.route("/admin/trash", methods=["GET"])
+def admin_trash():
+    require_admin()
+    items = []
+    for path in TRASH_DIR.rglob("*"):
+        try:
+            if path.is_symlink():
+                continue
+            if path.is_file() or path.is_dir():
+                items.append({
+                    "path": str(path.relative_to(TRASH_DIR)),
+                    "owner": path.relative_to(TRASH_DIR).parts[0],
+                    "name": path.name.split("_", 1)[-1],
+                    "kind": "Folder" if path.is_dir() else "File",
+                    "size": storage_usage(path) if path.is_dir() else path.stat().st_size,
+                })
+        except OSError:
+            continue
+    # Only show top-level trashed objects (not their contents).
+    items = [item for item in items if len(Path(item["path"]).parts) == 2]
+    return render_template("admin_trash.html", items=items, format_size=format_size)
+
+
+@app.route("/api/admin/trash", methods=["DELETE"])
+def permanently_delete_trash():
+    require_admin()
+    payload = request.get_json(silent=True) or {}
+    relative = payload.get("path", "")
+    target = contained_path(TRASH_DIR, relative)
+    if len(Path(relative).parts) != 2:
+        abort(403)
+    try:
+        if target.is_dir():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
+    except OSError:
+        app.logger.exception("Unable to permanently delete trash item")
+        return jsonify({"error": "Could not permanently delete item"}), 500
+    app.logger.warning("Permanently deleted trashed item")
+    return jsonify({"deleted": True})
+
+
 @app.route("/api/admin/users", methods=["POST"])
 def create_user():
     require_admin()
