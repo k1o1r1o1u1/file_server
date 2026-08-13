@@ -102,8 +102,11 @@ any outer web-server limit determine the maximum upload size.
 `/admin/login` is the administrator login. Its credentials remain the
 `FILESERVER_USERNAME` and `FILESERVER_PASSWORD_HASH` values in `.env`. The
 administrator can browse all storage and use **Users** in the top navigation to
-create ordinary accounts. This is application-level administrator access, not
-Linux `sudo` access.
+create ordinary accounts, reset passwords, disable/enable accounts, and delete
+accounts. Disabling takes effect on the user's next request. Deleting removes
+only the account; its `storage/users/USERNAME/` files are deliberately retained
+to avoid accidental data loss. This is application-level administrator access,
+not Linux `sudo` access.
 
 Ordinary users log in at `/login`. Every account gets a private directory at
 `storage/users/USERNAME/` and cannot browse, upload to, or download from any
@@ -111,3 +114,20 @@ other directory. Accounts and password hashes are stored in `fileserver.db` in
 the project directory; it is excluded from Git. Back up that file together with
 `storage/`, keep it private, and make sure the service user can write the
 project directory and `storage/`.
+
+Users can rename, move, copy, ZIP-download, and move their own files and
+folders to trash. Administrators can do the same anywhere in storage. Trashed
+items are kept in the project `trash/` directory; they are not automatically
+deleted, so periodically review and remove only items you no longer need.
+Folder ZIP downloads are created temporarily on the server before transfer, so
+ensure there is enough free disk space for the archive.
+
+When creating or editing a user, set a storage quota in MB or leave it blank
+for unlimited storage. The user sees their quota/usage bar while browsing, and
+the administrator sees each user's usage and quota in the Users panel. Uploads
+that would exceed the quota are rejected.
+
+All state-changing browser requests use a session CSRF token. If you later add
+your own HTML forms or JavaScript API calls, include the template value
+`{{ csrf_token }}` as a form field named `csrf_token`, or send it in the
+`X-CSRF-Token` request header.

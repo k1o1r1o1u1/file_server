@@ -19,11 +19,18 @@
   </h2>
   <div class="nav-actions">
     {% if is_admin %}<a class="btn-logout" href="{{ url_for('admin_users') }}"><i class="ph ph-users"></i> Users</a>{% endif %}
-    <a class="btn-logout" href="{{ url_for('logout') }}"><i class="ph ph-sign-out"></i> Logout{% if username %} ({{ username }}){% endif %}</a>
+    <form method="post" action="{{ url_for('logout') }}" class="logout-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn-logout" type="submit"><i class="ph ph-sign-out"></i> Logout{% if username %} ({{ username }}){% endif %}</button></form>
   </div>
 </nav>
 
 <div class="main-container animate-fade-in" style="animation-delay: 0.1s;">
+
+  {% if not is_admin and quota_bytes is not none %}
+  <div class="quota-panel glass-panel">
+    <div class="upload-status-row"><span>Storage used</span><span>{{ (usage_bytes / 1048576)|round(1) }} MB / {{ (quota_bytes / 1048576)|round(1) }} MB</span></div>
+    <div class="progress-track"><div class="progress-bar" style="width: {{ [100, (usage_bytes / quota_bytes * 100)]|min }}%"></div></div>
+  </div>
+  {% endif %}
 
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
@@ -47,6 +54,7 @@
       <button class="action-btn tool-btn" onclick="openFolderModal()"><i class="ph ph-folder-plus"></i> New folder</button>
       <label class="action-btn tool-btn upload-label" for="uploadFile"><i class="ph ph-upload-simple"></i> Upload file</label>
       <input id="uploadFile" type="file" hidden onchange="uploadFile(this.files[0])">
+      {% if path %}<a class="action-btn tool-btn" href="{{ url_for('download_folder_zip', path=path) }}"><i class="ph ph-file-zip"></i> Download folder</a>{% endif %}
     </div>
     <div id="uploadStatus" class="upload-status" aria-live="polite" hidden>
       <div class="upload-status-row"><span id="uploadMessage">Preparing upload…</span><span id="uploadPercent">0%</span></div>
@@ -73,6 +81,11 @@
           <button class="action-btn" onclick='shareFolder({{ ((path + "/" + f) if path else f)|tojson }}, {{ f|tojson }})'>
             <i class="ph ph-share-network"></i> Share
           </button>
+          <a class="action-btn" href="{{ url_for('download_folder_zip', path=(path + '/' + f) if path else f) }}"><i class="ph ph-file-zip"></i> ZIP</a>
+          <button class="action-btn" onclick='itemAction({{ f|tojson }}, "rename")'>Rename</button>
+          <button class="action-btn" onclick='itemAction({{ f|tojson }}, "move")'>Move</button>
+          <button class="action-btn" onclick='itemAction({{ f|tojson }}, "copy")'>Copy</button>
+          <button class="action-btn danger-btn" onclick='trashItem({{ f|tojson }})'>Trash</button>
         </div>
       </li>
     {% endfor %}
@@ -107,6 +120,10 @@
           <a class="action-btn" href="{{ url_for('download', path=path, file=f) }}">
             <i class="ph ph-download-simple"></i> Download
           </a>
+          <button class="action-btn" onclick='itemAction({{ f|tojson }}, "rename")'>Rename</button>
+          <button class="action-btn" onclick='itemAction({{ f|tojson }}, "move")'>Move</button>
+          <button class="action-btn" onclick='itemAction({{ f|tojson }}, "copy")'>Copy</button>
+          <button class="action-btn danger-btn" onclick='trashItem({{ f|tojson }})'>Trash</button>
         </div>
       </li>
     {% endfor %}
@@ -181,7 +198,7 @@
       const response = await fetch('/api/share', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json', 'X-CSRF-Token': {{ csrf_token|tojson }}
         },
         body: JSON.stringify({ path: path })
       });
@@ -250,7 +267,7 @@
   async function createFolder() {
     const name = document.getElementById('folderName').value.trim();
     const response = await fetch('/api/folder', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
+      method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': {{ csrf_token|tojson }}},
       body: JSON.stringify({path: currentPath, name})
     });
     const data = await response.json();
@@ -275,6 +292,7 @@
     percent.textContent = '0%'; bar.style.width = '0%'; speed.textContent = ''; bar.classList.remove('progress-error');
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/upload');
+    xhr.setRequestHeader('X-CSRF-Token', {{ csrf_token|tojson }});
     xhr.upload.onprogress = (event) => {
       if (!event.lengthComputable) return;
       const progress = Math.round(event.loaded / event.total * 100);
@@ -299,6 +317,34 @@
     };
     xhr.onerror = () => { message.textContent = 'Upload failed: network error'; speed.textContent = ''; bar.classList.add('progress-error'); };
     xhr.send(form);
+  }
+
+  async function fileApi(url, payload) {
+    const response = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': {{ csrf_token|tojson }}}, body: JSON.stringify(payload)});
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'Request failed');
+    return data;
+  }
+
+  async function itemAction(name, action) {
+    try {
+      if (action === 'rename') {
+        const newName = prompt(`Rename ${name} to:`, name);
+        if (newName === null || newName === name) return;
+        await fileApi('/api/rename', {path: currentPath, name, new_name: newName.trim()});
+      } else {
+        const destination = prompt(`Destination folder path from your root for ${action} (blank = root):`, '');
+        if (destination === null) return;
+        await fileApi('/api/move-copy', {path: currentPath, name, destination: destination.trim(), operation: action});
+      }
+      location.reload();
+    } catch (error) { alert(error.message); }
+  }
+
+  async function trashItem(name) {
+    if (!confirm(`Move ${name} to trash?`)) return;
+    try { await fileApi('/api/trash', {path: currentPath, name}); location.reload(); }
+    catch (error) { alert(error.message); }
   }
 </script>
 

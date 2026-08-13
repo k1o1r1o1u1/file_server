@@ -5,6 +5,10 @@ import os
 import secrets
 import re
 import sqlite3
+import hmac
+import shutil
+import tempfile
+import zipfile
 from pathlib import Path
 
 from flask import Flask, abort, flash, jsonify, redirect, render_template, request, send_file, session, url_for
@@ -17,10 +21,12 @@ APP_DIR = Path(__file__).resolve().parent
 STORAGE_DIR = Path(os.environ.get("FILESERVER_STORAGE_DIR", APP_DIR / "storage")).expanduser().resolve()
 USERS_DIR = STORAGE_DIR / "users"
 DATABASE_PATH = APP_DIR / "fileserver.db"
+TRASH_DIR = APP_DIR / "trash"
 IS_PRODUCTION = os.environ.get("FILESERVER_ENV", "production").lower() == "production"
 if not STORAGE_DIR.is_dir():
     raise RuntimeError(f"FILESERVER_STORAGE_DIR is not an existing directory: {STORAGE_DIR}")
 USERS_DIR.mkdir(exist_ok=True)
+TRASH_DIR.mkdir(exist_ok=True)
 
 
 def required_environment(name):
@@ -72,12 +78,40 @@ def initialize_database():
             CREATE TABLE IF NOT EXISTS users (
                 username TEXT PRIMARY KEY,
                 password_hash TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                quota_bytes INTEGER,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(users)")}
+        if "enabled" not in columns:
+            connection.execute("ALTER TABLE users ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+        if "quota_bytes" not in columns:
+            connection.execute("ALTER TABLE users ADD COLUMN quota_bytes INTEGER")
 
 
 initialize_database()
+
+
+def csrf_token():
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_urlsafe(32)
+    return session["csrf_token"]
+
+
+@app.context_processor
+def inject_template_values():
+    return {"csrf_token": csrf_token()}
+
+
+@app.before_request
+def protect_state_changing_requests():
+    if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+        return
+    submitted = request.headers.get("X-CSRF-Token") or request.form.get("csrf_token")
+    expected = session.get("csrf_token", "")
+    if not submitted or not expected or not hmac.compare_digest(submitted, expected):
+        abort(400, description="Invalid CSRF token")
 
 
 def reject_unsafe_relative_path(value):
@@ -132,6 +166,11 @@ def access_base():
     username = session.get("username")
     if not username:
         abort(403)
+    with database_connection() as connection:
+        user = connection.execute("SELECT enabled FROM users WHERE username = ?", (username,)).fetchone()
+    if user is None or not user["enabled"]:
+        session.clear()
+        abort(403)
     return contained_path(USERS_DIR, username, must_be_directory=True)
 
 
@@ -163,6 +202,34 @@ def list_directory(directory):
     return sorted(folders, key=str.lower), sorted(files, key=str.lower)
 
 
+def storage_usage(directory):
+    """Return regular-file usage without following symlinks."""
+    total = 0
+    for root, directories, files in os.walk(directory, followlinks=False):
+        directories[:] = [item for item in directories if not (Path(root) / item).is_symlink()]
+        for filename in files:
+            item = Path(root) / filename
+            try:
+                if not item.is_symlink():
+                    total += item.stat().st_size
+            except OSError:
+                continue
+    return total
+
+
+def user_quota(username):
+    with database_connection() as connection:
+        user = connection.execute("SELECT quota_bytes FROM users WHERE username = ?", (username,)).fetchone()
+    return user["quota_bytes"] if user else None
+
+
+def quota_information():
+    if session.get("role") != "user":
+        return None, None
+    base = access_base()
+    return storage_usage(base), user_quota(session["username"])
+
+
 def relative_parent(path):
     if not path:
         return None
@@ -176,9 +243,10 @@ def login():
         username = request.form.get("username", "")
         password = request.form.get("password", "")
         with database_connection() as connection:
-            user = connection.execute("SELECT username, password_hash FROM users WHERE username = ?", (username,)).fetchone()
+            user = connection.execute("SELECT username, password_hash FROM users WHERE username = ? AND enabled = 1", (username,)).fetchone()
         if user and check_password_hash(user["password_hash"], password):
             session.clear()
+            csrf_token()
             session["role"] = "user"
             session["username"] = user["username"]
             return redirect(url_for("index"))
@@ -194,6 +262,7 @@ def admin_login():
         password = request.form.get("password", "")
         if username == USERNAME and check_password_hash(PASSWORD_HASH, password):
             session.clear()
+            csrf_token()
             session["role"] = "admin"
             session["username"] = username
             return redirect(url_for("index"))
@@ -202,7 +271,7 @@ def admin_login():
     return render_template("login.html", admin_login=True)
 
 
-@app.route("/logout")
+@app.route("/logout", methods=["POST"])
 def logout():
     session.clear()
     return redirect(url_for("login"))
@@ -215,7 +284,8 @@ def index():
     rel_path = request.args.get("path", "")
     current_path = safe_path(rel_path)
     folders, files = list_directory(current_path)
-    return render_template("index.html", folders=folders, files=files, path=rel_path, parent=relative_parent(rel_path), is_admin=session.get("role") == "admin", username=session.get("username"))
+    usage, quota = quota_information()
+    return render_template("index.html", folders=folders, files=files, path=rel_path, parent=relative_parent(rel_path), is_admin=session.get("role") == "admin", username=session.get("username"), usage_bytes=usage, quota_bytes=quota)
 
 
 def authenticated_file():
@@ -228,6 +298,8 @@ def authenticated_file():
 def require_login():
     if not session.get("role"):
         abort(403)
+    if session.get("role") == "user":
+        access_base()
 
 
 def require_admin():
@@ -289,11 +361,23 @@ def upload_file():
         return jsonify({"error": "Choose a file to upload"}), 400
     filename = upload_filename(uploaded.filename)
     destination = folder / filename
+    remaining_quota = None
+    if session.get("role") == "user":
+        quota = user_quota(session["username"])
+        if quota is not None:
+            usage = storage_usage(access_base())
+            remaining_quota = max(quota - usage, 0)
     # Exclusive creation avoids accidental overwrites and prevents an existing
     # symlink from being followed. Write in chunks to avoid loading files in RAM.
     try:
+        written = 0
         with destination.open("xb") as output:
             while chunk := uploaded.stream.read(64 * 1024):
+                written += len(chunk)
+                if remaining_quota is not None and written > remaining_quota:
+                    output.close()
+                    destination.unlink(missing_ok=True)
+                    return jsonify({"error": "Upload would exceed your storage quota"}), 413
                 output.write(chunk)
     except FileExistsError:
         return jsonify({"error": "A file with that name already exists"}), 409
@@ -303,12 +387,109 @@ def upload_file():
     return jsonify({"name": filename}), 201
 
 
+def item_from_request(payload):
+    parent = safe_path(payload.get("path", ""))
+    name = safe_filename(payload.get("name"))
+    return parent, contained_path(parent, name)
+
+
+@app.route("/api/rename", methods=["POST"])
+def rename_item():
+    require_login()
+    payload = request.get_json(silent=True) or {}
+    parent, source = item_from_request(payload)
+    new_name = payload.get("new_name", "").strip() if isinstance(payload.get("new_name"), str) else ""
+    safe_filename(new_name)
+    destination = parent / new_name
+    if destination.exists():
+        return jsonify({"error": "A file or folder with that name already exists"}), 409
+    try:
+        source.rename(destination)
+    except OSError:
+        app.logger.exception("Unable to rename item")
+        return jsonify({"error": "Could not rename item"}), 500
+    return jsonify({"name": new_name})
+
+
+@app.route("/api/move-copy", methods=["POST"])
+def move_or_copy_item():
+    require_login()
+    payload = request.get_json(silent=True) or {}
+    parent, source = item_from_request(payload)
+    destination_parent = safe_path(payload.get("destination", ""))
+    operation = payload.get("operation")
+    if operation not in {"move", "copy"}:
+        return jsonify({"error": "Invalid operation"}), 400
+    destination = destination_parent / source.name
+    if destination.exists():
+        return jsonify({"error": "Destination already contains that name"}), 409
+    if source.is_dir():
+        try:
+            destination_parent.resolve().relative_to(source)
+            return jsonify({"error": "Cannot move or copy a folder inside itself"}), 400
+        except ValueError:
+            pass
+    try:
+        if operation == "move":
+            shutil.move(str(source), str(destination))
+        elif source.is_dir():
+            shutil.copytree(source, destination, symlinks=True)
+        else:
+            shutil.copy2(source, destination, follow_symlinks=False)
+    except OSError:
+        app.logger.exception("Unable to %s item", operation)
+        return jsonify({"error": f"Could not {operation} item"}), 500
+    return jsonify({"name": source.name, "operation": operation})
+
+
+@app.route("/api/trash", methods=["POST"])
+def trash_item():
+    require_login()
+    payload = request.get_json(silent=True) or {}
+    _, source = item_from_request(payload)
+    owner = session.get("username", "admin")
+    destination_dir = TRASH_DIR / owner
+    destination_dir.mkdir(mode=0o700, exist_ok=True)
+    destination = destination_dir / f"{secrets.token_hex(8)}_{source.name}"
+    try:
+        shutil.move(str(source), str(destination))
+    except OSError:
+        app.logger.exception("Unable to move item to trash")
+        return jsonify({"error": "Could not move item to trash"}), 500
+    return jsonify({"name": source.name})
+
+
+@app.route("/zip")
+def download_folder_zip():
+    require_login()
+    folder = safe_path(request.args.get("path", ""))
+    temporary = tempfile.NamedTemporaryFile(prefix="fileserver-", suffix=".zip", delete=False)
+    temporary.close()
+    archive_path = Path(temporary.name)
+    try:
+        with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
+            for root, directories, files in os.walk(folder, followlinks=False):
+                directories[:] = [item for item in directories if not (Path(root) / item).is_symlink()]
+                for filename in files:
+                    item = Path(root) / filename
+                    if not item.is_symlink():
+                        archive.write(item, item.relative_to(folder.parent))
+    except OSError:
+        archive_path.unlink(missing_ok=True)
+        app.logger.exception("Unable to create ZIP archive")
+        abort(500)
+    response = send_file(archive_path, as_attachment=True, download_name=f"{folder.name or 'files'}.zip")
+    response.call_on_close(lambda: archive_path.unlink(missing_ok=True))
+    return response
+
+
 @app.route("/admin/users", methods=["GET"])
 def admin_users():
     require_admin()
     with database_connection() as connection:
-        users = connection.execute("SELECT username, created_at FROM users ORDER BY username COLLATE NOCASE").fetchall()
-    return render_template("admin_users.html", users=users)
+        users = connection.execute("SELECT username, enabled, quota_bytes, created_at FROM users ORDER BY username COLLATE NOCASE").fetchall()
+    usage = {user["username"]: storage_usage(USERS_DIR / user["username"]) for user in users}
+    return render_template("admin_users.html", users=users, user_usage=usage)
 
 
 @app.route("/api/admin/users", methods=["POST"])
@@ -317,14 +498,20 @@ def create_user():
     payload = request.get_json(silent=True) or {}
     username = payload.get("username", "").strip() if isinstance(payload.get("username"), str) else ""
     password = payload.get("password", "")
+    quota_mb = payload.get("quota_mb")
     if not USERNAME_PATTERN.fullmatch(username):
         return jsonify({"error": "Username must be 3–32 letters, numbers, _ or -"}), 400
     if not isinstance(password, str) or len(password) < 10:
         return jsonify({"error": "Password must be at least 10 characters"}), 400
+    quota_bytes = None
+    if quota_mb is not None:
+        if not isinstance(quota_mb, int) or quota_mb < 1:
+            return jsonify({"error": "Quota must be a positive whole number of MB, or unlimited"}), 400
+        quota_bytes = quota_mb * 1024 * 1024
     user_folder = USERS_DIR / username
     try:
         with database_connection() as connection:
-            connection.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (username, generate_password_hash(password)))
+            connection.execute("INSERT INTO users (username, password_hash, quota_bytes) VALUES (?, ?, ?)", (username, generate_password_hash(password), quota_bytes))
         user_folder.mkdir(mode=0o700)
     except sqlite3.IntegrityError:
         return jsonify({"error": "That username already exists"}), 409
@@ -335,6 +522,73 @@ def create_user():
         return jsonify({"error": "Could not create the user folder"}), 500
     app.logger.info("Created user account: %s", username)
     return jsonify({"username": username}), 201
+
+
+@app.route("/api/admin/users/<username>/quota", methods=["POST"])
+def set_user_quota(username):
+    require_admin()
+    if not USERNAME_PATTERN.fullmatch(username):
+        abort(404)
+    payload = request.get_json(silent=True) or {}
+    quota_mb = payload.get("quota_mb")
+    if quota_mb is None:
+        quota_bytes = None
+    elif isinstance(quota_mb, int) and quota_mb >= 1:
+        quota_bytes = quota_mb * 1024 * 1024
+    else:
+        return jsonify({"error": "Quota must be a positive whole number of MB, or unlimited"}), 400
+    with database_connection() as connection:
+        updated = connection.execute("UPDATE users SET quota_bytes = ? WHERE username = ?", (quota_bytes, username)).rowcount
+    if not updated:
+        abort(404)
+    return jsonify({"username": username, "quota_bytes": quota_bytes})
+
+
+@app.route("/api/admin/users/<username>/password", methods=["POST"])
+def reset_user_password(username):
+    require_admin()
+    if not USERNAME_PATTERN.fullmatch(username):
+        abort(404)
+    payload = request.get_json(silent=True) or {}
+    password = payload.get("password", "")
+    if not isinstance(password, str) or len(password) < 10:
+        return jsonify({"error": "Password must be at least 10 characters"}), 400
+    with database_connection() as connection:
+        updated = connection.execute("UPDATE users SET password_hash = ? WHERE username = ?", (generate_password_hash(password), username)).rowcount
+    if not updated:
+        abort(404)
+    app.logger.info("Reset password for user account: %s", username)
+    return jsonify({"username": username})
+
+
+@app.route("/api/admin/users/<username>/enabled", methods=["POST"])
+def set_user_enabled(username):
+    require_admin()
+    if not USERNAME_PATTERN.fullmatch(username):
+        abort(404)
+    payload = request.get_json(silent=True) or {}
+    enabled = payload.get("enabled")
+    if not isinstance(enabled, bool):
+        return jsonify({"error": "enabled must be true or false"}), 400
+    with database_connection() as connection:
+        updated = connection.execute("UPDATE users SET enabled = ? WHERE username = ?", (enabled, username)).rowcount
+    if not updated:
+        abort(404)
+    app.logger.info("%s user account: %s", "Enabled" if enabled else "Disabled", username)
+    return jsonify({"username": username, "enabled": enabled})
+
+
+@app.route("/api/admin/users/<username>", methods=["DELETE"])
+def delete_user(username):
+    require_admin()
+    if not USERNAME_PATTERN.fullmatch(username):
+        abort(404)
+    with database_connection() as connection:
+        deleted = connection.execute("DELETE FROM users WHERE username = ?", (username,)).rowcount
+    if not deleted:
+        abort(404)
+    app.logger.warning("Deleted user account; files retained: %s", username)
+    return jsonify({"username": username, "files_retained": True})
 
 
 @app.route("/api/share", methods=["POST"])

@@ -16,6 +16,7 @@
     <form id="createUserForm">
       <input id="newUsername" type="text" placeholder="Username (3–32 characters)" required maxlength="32" autocomplete="off">
       <input id="newPassword" type="password" placeholder="Temporary password (at least 10 characters)" required minlength="10" autocomplete="new-password">
+      <input id="newQuota" type="number" min="1" step="1" placeholder="Storage quota in MB (blank = unlimited)">
       <button type="submit">Create user and folder</button>
     </form>
     <p id="userMessage" class="text-muted" aria-live="polite"></p>
@@ -23,20 +24,44 @@
   <section class="glass-panel user-management">
     <h3>Existing users</h3>
     <ul class="file-list">
-      {% for user in users %}<li class="file-item"><div class="file-info"><i class="ph ph-user"></i><span>{{ user['username'] }}</span></div><span class="text-muted">Created {{ user['created_at'] }}</span></li>
+      {% for user in users %}<li class="file-item user-row" data-username="{{ user['username'] }}"><div class="file-info"><i class="ph ph-user"></i><span>{{ user['username'] }}</span>{% if not user['enabled'] %}<span class="account-disabled">Disabled</span>{% endif %}</div><div class="user-actions"><span class="text-muted">{{ (user_usage[user['username']] / 1048576)|round(1) }} MB / {{ (user['quota_bytes'] / 1048576)|round(1) if user['quota_bytes'] is not none else 'Unlimited' }}</span>{% if user['quota_bytes'] is not none %}<div class="quota-mini"><div class="progress-track"><div class="progress-bar" style="width: {{ [100, (user_usage[user['username']] / user['quota_bytes'] * 100)]|min }}%"></div></div></div>{% endif %}<button class="action-btn" onclick='setQuota({{ user["username"]|tojson }}, {{ (user["quota_bytes"] / 1048576)|round if user["quota_bytes"] is not none else "null" }})'>Quota</button><button class="action-btn" onclick='resetPassword({{ user["username"]|tojson }})'>Reset password</button><button class="action-btn" onclick='toggleUser({{ user["username"]|tojson }}, {{ user["enabled"]|tojson }})'>{{ 'Disable' if user['enabled'] else 'Enable' }}</button><button class="action-btn danger-btn" onclick='deleteUser({{ user["username"]|tojson }})'>Delete</button></div></li>
       {% else %}<li class="file-item"><span class="text-muted">No user accounts yet.</span></li>{% endfor %}
     </ul>
   </section>
 </main>
 <script>
+const csrfToken = {{ csrf_token|tojson }};
+async function api(url, method, payload) {
+  const response = await fetch(url, {method, headers: {'Content-Type':'application/json', 'X-CSRF-Token': csrfToken}, body: payload === undefined ? undefined : JSON.stringify(payload)});
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
 document.getElementById('createUserForm').addEventListener('submit', async (event) => {
   event.preventDefault();
   const message = document.getElementById('userMessage');
-  const response = await fetch('/api/admin/users', {method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({username: newUsername.value.trim(), password: newPassword.value})});
-  const data = await response.json();
-  if (response.ok) { message.textContent = `Created ${data.username}. Give the user their password securely.`; event.target.reset(); setTimeout(() => location.reload(), 700); }
-  else message.textContent = data.error || 'Could not create user';
+  const quota = newQuota.value === '' ? null : Number(newQuota.value);
+  try { const data = await api('/api/admin/users', 'POST', {username: newUsername.value.trim(), password: newPassword.value, quota_mb: quota}); message.textContent = `Created ${data.username}. Give the user their password securely.`; event.target.reset(); setTimeout(() => location.reload(), 700); }
+  catch (error) { message.textContent = error.message; }
 });
+async function resetPassword(username) {
+  const password = prompt(`New password for ${username} (minimum 10 characters):`);
+  if (password === null) return;
+  try { await api(`/api/admin/users/${encodeURIComponent(username)}/password`, 'POST', {password}); alert('Password reset.'); } catch (error) { alert(error.message); }
+}
+async function toggleUser(username, enabled) {
+  if (!confirm(`${enabled ? 'Disable' : 'Enable'} ${username}?`)) return;
+  try { await api(`/api/admin/users/${encodeURIComponent(username)}/enabled`, 'POST', {enabled: !enabled}); location.reload(); } catch (error) { alert(error.message); }
+}
+async function deleteUser(username) {
+  if (!confirm(`Delete the ${username} account? Their files will be retained in storage/users/${username}.`)) return;
+  try { await api(`/api/admin/users/${encodeURIComponent(username)}`, 'DELETE'); location.reload(); } catch (error) { alert(error.message); }
+}
+async function setQuota(username, currentQuota) {
+  const quota = prompt(`Storage quota in MB for ${username}. Leave blank for unlimited:`, currentQuota === null ? '' : currentQuota);
+  if (quota === null) return;
+  try { await api(`/api/admin/users/${encodeURIComponent(username)}/quota`, 'POST', {quota_mb: quota.trim() === '' ? null : Number(quota)}); location.reload(); } catch (error) { alert(error.message); }
+}
 </script>
 </body>
 </html>

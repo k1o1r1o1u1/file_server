@@ -245,8 +245,15 @@ button:active {
 }
 
 .nav-actions { display: flex; align-items: center; gap: 8px; }
+.logout-form { margin: 0; }
+.logout-form .btn-logout { border: 0; box-shadow: none; width: auto; }
 .login-switch { display: inline-block; margin-top: 16px; font-size: 0.9rem; }
 .user-management { padding: 24px; margin-bottom: 20px; }
+.quota-panel { margin-bottom: 20px; padding: 14px 18px; }
+.user-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.quota-mini { width: 100px; }
+.account-disabled { color: #fca5a5; font-size: 0.8rem; }
+.danger-btn:hover { background: var(--danger); }
 
 .main-container {
   max-width: 900px;

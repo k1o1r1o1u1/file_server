@@ -3,5 +3,6 @@
 __pycache__/
 *.pyc
 fileserver.db
+trash/
 storage/*
 !storage/.gitkeep
