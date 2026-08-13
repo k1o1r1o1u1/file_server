@@ -9,6 +9,7 @@ import hmac
 import shutil
 import tempfile
 import zipfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from flask import Flask, abort, flash, jsonify, redirect, render_template, request, send_file, session, url_for
@@ -88,9 +89,11 @@ def initialize_database():
             connection.execute("ALTER TABLE users ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
         if "quota_bytes" not in columns:
             connection.execute("ALTER TABLE users ADD COLUMN quota_bytes INTEGER")
+        connection.execute("CREATE TABLE IF NOT EXISTS trash_items (item_id TEXT PRIMARY KEY, owner TEXT NOT NULL, storage_path TEXT NOT NULL, original_path TEXT NOT NULL, created_at TEXT NOT NULL)")
 
 
 initialize_database()
+TRASH_RETENTION_DAYS = 30
 
 
 def csrf_token():
@@ -255,7 +258,7 @@ def login():
     return render_template("login.html", admin_login=False)
 
 
-@app.route("/admin/login", methods=["GET", "POST"])
+@app.route("/login/admin", methods=["GET", "POST"])
 def admin_login():
     if request.method == "POST":
         username = request.form.get("username", "")
@@ -450,12 +453,16 @@ def trash_item():
     owner = session.get("username", "admin")
     destination_dir = TRASH_DIR / owner
     destination_dir.mkdir(mode=0o700, exist_ok=True)
-    destination = destination_dir / f"{secrets.token_hex(8)}_{source.name}"
+    item_id = secrets.token_hex(16)
+    destination = destination_dir / f"{item_id}_{source.name}"
+    original_path = str(source.relative_to(access_base())).replace(os.sep, "/")
     try:
         shutil.move(str(source), str(destination))
     except OSError:
         app.logger.exception("Unable to move item to trash")
         return jsonify({"error": "Could not move item to trash"}), 500
+    with database_connection() as connection:
+        connection.execute("INSERT INTO trash_items VALUES (?, ?, ?, ?, ?)", (item_id, owner, str(destination.relative_to(TRASH_DIR)).replace(os.sep, "/"), original_path, datetime.now(timezone.utc).isoformat()))
     return jsonify({"name": source.name})
 
 
@@ -499,37 +506,54 @@ def format_size(size):
         size /= 1024
 
 
+def cleanup_expired_trash():
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=TRASH_RETENTION_DAYS)).isoformat()
+    with database_connection() as connection:
+        records = connection.execute("SELECT * FROM trash_items WHERE created_at < ?", (cutoff,)).fetchall()
+        for record in records:
+            target = TRASH_DIR / record["storage_path"]
+            try:
+                if target.is_dir(): shutil.rmtree(target)
+                else: target.unlink(missing_ok=True)
+            except OSError: continue
+            connection.execute("DELETE FROM trash_items WHERE item_id = ?", (record["item_id"],))
+
+
+def render_trash(is_admin):
+    cleanup_expired_trash()
+    with database_connection() as connection:
+        records = connection.execute("SELECT * FROM trash_items ORDER BY created_at DESC" if is_admin else "SELECT * FROM trash_items WHERE owner = ? ORDER BY created_at DESC", () if is_admin else (session["username"],)).fetchall()
+    items = []
+    for record in records:
+        path = TRASH_DIR / record["storage_path"]
+        try:
+            if path.exists() and not path.is_symlink(): items.append({**dict(record), "name": path.name.split("_", 1)[-1], "kind": "Folder" if path.is_dir() else "File", "size": storage_usage(path) if path.is_dir() else path.stat().st_size})
+        except OSError: continue
+    return render_template("trash.html", items=items, format_size=format_size, is_admin=is_admin)
+
+
+@app.route("/trash", methods=["GET"])
+def user_trash():
+    require_login()
+    return render_trash(session.get("role") == "admin")
+
+
 @app.route("/admin/trash", methods=["GET"])
 def admin_trash():
     require_admin()
-    items = []
-    for path in TRASH_DIR.rglob("*"):
-        try:
-            if path.is_symlink():
-                continue
-            if path.is_file() or path.is_dir():
-                items.append({
-                    "path": str(path.relative_to(TRASH_DIR)),
-                    "owner": path.relative_to(TRASH_DIR).parts[0],
-                    "name": path.name.split("_", 1)[-1],
-                    "kind": "Folder" if path.is_dir() else "File",
-                    "size": storage_usage(path) if path.is_dir() else path.stat().st_size,
-                })
-        except OSError:
-            continue
-    # Only show top-level trashed objects (not their contents).
-    items = [item for item in items if len(Path(item["path"]).parts) == 2]
-    return render_template("admin_trash.html", items=items, format_size=format_size)
+    return render_trash(True)
 
 
-@app.route("/api/admin/trash", methods=["DELETE"])
+@app.route("/api/trash", methods=["DELETE"])
 def permanently_delete_trash():
-    require_admin()
+    require_login()
     payload = request.get_json(silent=True) or {}
-    relative = payload.get("path", "")
-    target = contained_path(TRASH_DIR, relative)
-    if len(Path(relative).parts) != 2:
-        abort(403)
+    item_id = payload.get("item_id", "")
+    with database_connection() as connection:
+        record = connection.execute("SELECT * FROM trash_items WHERE item_id = ?", (item_id,)).fetchone()
+    if record is None or (session.get("role") != "admin" and record["owner"] != session.get("username")):
+        abort(404)
+    target = contained_path(TRASH_DIR, record["storage_path"])
     try:
         if target.is_dir():
             shutil.rmtree(target)
@@ -539,7 +563,47 @@ def permanently_delete_trash():
         app.logger.exception("Unable to permanently delete trash item")
         return jsonify({"error": "Could not permanently delete item"}), 500
     app.logger.warning("Permanently deleted trashed item")
+    with database_connection() as connection:
+        connection.execute("DELETE FROM trash_items WHERE item_id = ?", (item_id,))
     return jsonify({"deleted": True})
+
+
+@app.route("/api/trash/restore", methods=["POST"])
+def restore_trash_item():
+    require_login()
+    payload = request.get_json(silent=True) or {}
+    item_id = payload.get("item_id", "")
+    with database_connection() as connection:
+        record = connection.execute("SELECT * FROM trash_items WHERE item_id = ?", (item_id,)).fetchone()
+    if record is None or (session.get("role") != "admin" and record["owner"] != session.get("username")):
+        abort(404)
+    source = contained_path(TRASH_DIR, record["storage_path"])
+    base = STORAGE_DIR if record["owner"] == USERNAME else contained_path(USERS_DIR, record["owner"], must_be_directory=True)
+    destination = base / reject_unsafe_relative_path(record["original_path"])
+    if destination.exists():
+        return jsonify({"error": "Original location already contains an item with that name"}), 409
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(source), str(destination))
+    with database_connection() as connection:
+        connection.execute("DELETE FROM trash_items WHERE item_id = ?", (item_id,))
+    return jsonify({"restored": True})
+
+
+@app.route("/api/trash/empty", methods=["DELETE"])
+def empty_trash():
+    require_login()
+    is_admin = session.get("role") == "admin"
+    with database_connection() as connection:
+        records = connection.execute("SELECT * FROM trash_items" if is_admin else "SELECT * FROM trash_items WHERE owner = ?", () if is_admin else (session["username"],)).fetchall()
+    for record in records:
+        target = TRASH_DIR / record["storage_path"]
+        try:
+            if target.is_dir(): shutil.rmtree(target)
+            else: target.unlink(missing_ok=True)
+        except OSError: continue
+        with database_connection() as connection:
+            connection.execute("DELETE FROM trash_items WHERE item_id = ?", (record["item_id"],))
+    return jsonify({"emptied": True})
 
 
 @app.route("/api/admin/users", methods=["POST"])

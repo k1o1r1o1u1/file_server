@@ -19,6 +19,7 @@
   </h2>
   <div class="nav-actions">
     {% if is_admin %}<a class="btn-logout" href="{{ url_for('admin_users') }}"><i class="ph ph-users"></i> Users</a>{% endif %}
+    <a class="btn-logout" href="{{ url_for('user_trash') }}"><i class="ph ph-trash"></i> Trash</a>
     <form method="post" action="{{ url_for('logout') }}" class="logout-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn-logout" type="submit"><i class="ph ph-sign-out"></i> Logout{% if username %} ({{ username }}){% endif %}</button></form>
   </div>
 </nav>

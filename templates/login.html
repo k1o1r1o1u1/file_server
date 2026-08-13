@@ -42,11 +42,7 @@
         Authenticate <i class="ph ph-arrow-right" style="margin-left: 8px; vertical-align: middle;"></i>
       </button>
     </form>
-    {% if admin_login %}
-      <a class="login-switch" href="{{ url_for('login') }}">User login</a>
-    {% else %}
-      <a class="login-switch" href="{{ url_for('admin_login') }}">Administrator login</a>
-    {% endif %}
+    {% if admin_login %}<a class="login-switch" href="{{ url_for('login') }}">User login</a>{% endif %}
   </div>
 </body>
 </html>
