@@ -324,12 +324,22 @@ def upload_destination(folder, uploaded, relative_path):
     filename = upload_filename(uploaded.filename)
     if not relative_path:
         return folder / filename
+    # webkitRelativePath is browser metadata (for example
+    # Photos/2026/.flask_secret), not a trusted filesystem path. Sanitize every
+    # component rather than requiring it to match the browser filename exactly.
     relative = reject_unsafe_relative_path(relative_path)
-    if relative.name != uploaded.filename or len(relative.parts) < 2:
+    if len(relative.parts) < 2:
         abort(400, description="Invalid folder upload path")
-    # Browser directory uploads send a relative path such as Photos/2026/a.jpg.
-    # Create only directories below the already-authorized target folder.
-    destination = folder / relative
+    safe_parts = []
+    for part in relative.parts[:-1]:
+        safe_part = secure_filename(part)
+        if not safe_part:
+            abort(400, description="Folder upload contains an invalid folder name")
+        safe_parts.append(safe_part)
+    # Use the separately validated upload filename for the final component.
+    # This accepts harmless dot-files (such as .flask_secret) as flask_secret
+    # instead of letting one hidden file fail the entire selected folder.
+    destination = folder.joinpath(*safe_parts, filename)
     try:
         destination.resolve(strict=False).relative_to(folder.resolve())
     except ValueError:
