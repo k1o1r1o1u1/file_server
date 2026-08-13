@@ -244,6 +244,10 @@ button:active {
   background: rgba(239, 68, 68, 0.1);
 }
 
+.nav-actions { display: flex; align-items: center; gap: 8px; }
+.login-switch { display: inline-block; margin-top: 16px; font-size: 0.9rem; }
+.user-management { padding: 24px; margin-bottom: 20px; }
+
 .main-container {
   max-width: 900px;
   margin: 40px auto;

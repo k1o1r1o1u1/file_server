@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Nexus File Manager - Users</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+</head>
+<body class="fm-body">
+<nav class="navbar"><h2><i class="ph-fill ph-shield-check" style="color: var(--primary)"></i> Administrator / <span>Users</span></h2><a class="btn-logout" href="{{ url_for('index') }}">Back to files</a></nav>
+<main class="main-container">
+  <section class="glass-panel user-management">
+    <h3>Create user</h3>
+    <p class="text-muted">Each user is restricted to their own private folder.</p>
+    <form id="createUserForm">
+      <input id="newUsername" type="text" placeholder="Username (3–32 characters)" required maxlength="32" autocomplete="off">
+      <input id="newPassword" type="password" placeholder="Temporary password (at least 10 characters)" required minlength="10" autocomplete="new-password">
+      <button type="submit">Create user and folder</button>
+    </form>
+    <p id="userMessage" class="text-muted" aria-live="polite"></p>
+  </section>
+  <section class="glass-panel user-management">
+    <h3>Existing users</h3>
+    <ul class="file-list">
+      {% for user in users %}<li class="file-item"><div class="file-info"><i class="ph ph-user"></i><span>{{ user['username'] }}</span></div><span class="text-muted">Created {{ user['created_at'] }}</span></li>
+      {% else %}<li class="file-item"><span class="text-muted">No user accounts yet.</span></li>{% endfor %}
+    </ul>
+  </section>
+</main>
+<script>
+document.getElementById('createUserForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const message = document.getElementById('userMessage');
+  const response = await fetch('/api/admin/users', {method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({username: newUsername.value.trim(), password: newPassword.value})});
+  const data = await response.json();
+  if (response.ok) { message.textContent = `Created ${data.username}. Give the user their password securely.`; event.target.reset(); setTimeout(() => location.reload(), 700); }
+  else message.textContent = data.error || 'Could not create user';
+});
+</script>
+</body>
+</html>

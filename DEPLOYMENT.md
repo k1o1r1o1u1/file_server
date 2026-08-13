@@ -88,3 +88,18 @@ Authenticated users can create folders and upload files through the browser.
 Uploads cannot overwrite an existing file and reject path-like filenames. The
 browser shows upload progress and approximate speed; available disk space and
 any outer web-server limit determine the maximum upload size.
+
+## User accounts and administrator
+
+`/admin/login` is the administrator login. Its credentials remain the
+`FILESERVER_USERNAME` and `FILESERVER_PASSWORD_HASH` values in `.env`. The
+administrator can browse all storage and use **Users** in the top navigation to
+create ordinary accounts. This is application-level administrator access, not
+Linux `sudo` access.
+
+Ordinary users log in at `/login`. Every account gets a private directory at
+`storage/users/USERNAME/` and cannot browse, upload to, or download from any
+other directory. Accounts and password hashes are stored in `fileserver.db` in
+the project directory; it is excluded from Git. Back up that file together with
+`storage/`, keep it private, and make sure the service user can write the
+project directory and `storage/`.

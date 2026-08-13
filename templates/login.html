@@ -13,7 +13,7 @@
     <div class="login-icon">
       <i class="ph-fill ph-fingerprint"></i>
     </div>
-    <h2 style="margin-bottom: 24px;">Welcome Back</h2>
+    <h2 style="margin-bottom: 24px;">{{ 'Administrator Login' if admin_login else 'User Login' }}</h2>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
@@ -41,6 +41,11 @@
         Authenticate <i class="ph ph-arrow-right" style="margin-left: 8px; vertical-align: middle;"></i>
       </button>
     </form>
+    {% if admin_login %}
+      <a class="login-switch" href="{{ url_for('login') }}">User login</a>
+    {% else %}
+      <a class="login-switch" href="{{ url_for('admin_login') }}">Administrator login</a>
+    {% endif %}
   </div>
 </body>
 </html>

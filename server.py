@@ -3,19 +3,24 @@
 import logging
 import os
 import secrets
+import re
+import sqlite3
 from pathlib import Path
 
 from flask import Flask, abort, flash, jsonify, redirect, render_template, request, send_file, session, url_for
 from werkzeug.exceptions import HTTPException
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
 
 APP_DIR = Path(__file__).resolve().parent
 STORAGE_DIR = Path(os.environ.get("FILESERVER_STORAGE_DIR", APP_DIR / "storage")).expanduser().resolve()
+USERS_DIR = STORAGE_DIR / "users"
+DATABASE_PATH = APP_DIR / "fileserver.db"
 IS_PRODUCTION = os.environ.get("FILESERVER_ENV", "production").lower() == "production"
 if not STORAGE_DIR.is_dir():
     raise RuntimeError(f"FILESERVER_STORAGE_DIR is not an existing directory: {STORAGE_DIR}")
+USERS_DIR.mkdir(exist_ok=True)
 
 
 def required_environment(name):
@@ -51,6 +56,28 @@ PASSWORD_HASH = required_environment("FILESERVER_PASSWORD_HASH")
 # Deliberately in-memory for now.  This small interface makes a later SQLite
 # implementation possible without changing route code.
 SHARED_LINKS = {}
+
+USERNAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{2,31}$")
+
+
+def database_connection():
+    connection = sqlite3.connect(DATABASE_PATH)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def initialize_database():
+    with database_connection() as connection:
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                username TEXT PRIMARY KEY,
+                password_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+
+initialize_database()
 
 
 def reject_unsafe_relative_path(value):
@@ -98,9 +125,18 @@ def safe_filename(filename):
     return filename
 
 
+def access_base():
+    """Admin can access all storage; every user is confined to their own folder."""
+    if session.get("role") == "admin":
+        return STORAGE_DIR
+    username = session.get("username")
+    if not username:
+        abort(403)
+    return contained_path(USERS_DIR, username, must_be_directory=True)
+
+
 def safe_path(rel_path):
-    """Compatibility helper for authenticated directory browsing."""
-    return contained_path(STORAGE_DIR, rel_path, must_be_directory=True)
+    return contained_path(access_base(), rel_path, must_be_directory=True)
 
 
 def shared_link(token):
@@ -139,13 +175,31 @@ def login():
     if request.method == "POST":
         username = request.form.get("username", "")
         password = request.form.get("password", "")
-        if username == USERNAME and check_password_hash(PASSWORD_HASH, password):
+        with database_connection() as connection:
+            user = connection.execute("SELECT username, password_hash FROM users WHERE username = ?", (username,)).fetchone()
+        if user and check_password_hash(user["password_hash"], password):
             session.clear()
-            session["logged_in"] = True
+            session["role"] = "user"
+            session["username"] = user["username"]
             return redirect(url_for("index"))
         app.logger.warning("Failed login attempt")
         flash("Invalid credentials", "error")
-    return render_template("login.html")
+    return render_template("login.html", admin_login=False)
+
+
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        if username == USERNAME and check_password_hash(PASSWORD_HASH, password):
+            session.clear()
+            session["role"] = "admin"
+            session["username"] = username
+            return redirect(url_for("index"))
+        app.logger.warning("Failed admin login attempt")
+        flash("Invalid credentials", "error")
+    return render_template("login.html", admin_login=True)
 
 
 @app.route("/logout")
@@ -156,23 +210,28 @@ def logout():
 
 @app.route("/", methods=["GET"])
 def index():
-    if not session.get("logged_in"):
+    if not session.get("role"):
         return redirect(url_for("login"))
     rel_path = request.args.get("path", "")
     current_path = safe_path(rel_path)
     folders, files = list_directory(current_path)
-    return render_template("index.html", folders=folders, files=files, path=rel_path, parent=relative_parent(rel_path))
+    return render_template("index.html", folders=folders, files=files, path=rel_path, parent=relative_parent(rel_path), is_admin=session.get("role") == "admin", username=session.get("username"))
 
 
 def authenticated_file():
-    if not session.get("logged_in"):
+    if not session.get("role"):
         return None
     folder = safe_path(request.args.get("path", ""))
     return contained_path(folder, safe_filename(request.args.get("file")), must_be_file=True)
 
 
 def require_login():
-    if not session.get("logged_in"):
+    if not session.get("role"):
+        abort(403)
+
+
+def require_admin():
+    if session.get("role") != "admin":
         abort(403)
 
 
@@ -242,6 +301,40 @@ def upload_file():
         app.logger.exception("Unable to save uploaded file")
         return jsonify({"error": "Could not save upload"}), 500
     return jsonify({"name": filename}), 201
+
+
+@app.route("/admin/users", methods=["GET"])
+def admin_users():
+    require_admin()
+    with database_connection() as connection:
+        users = connection.execute("SELECT username, created_at FROM users ORDER BY username COLLATE NOCASE").fetchall()
+    return render_template("admin_users.html", users=users)
+
+
+@app.route("/api/admin/users", methods=["POST"])
+def create_user():
+    require_admin()
+    payload = request.get_json(silent=True) or {}
+    username = payload.get("username", "").strip() if isinstance(payload.get("username"), str) else ""
+    password = payload.get("password", "")
+    if not USERNAME_PATTERN.fullmatch(username):
+        return jsonify({"error": "Username must be 3–32 letters, numbers, _ or -"}), 400
+    if not isinstance(password, str) or len(password) < 10:
+        return jsonify({"error": "Password must be at least 10 characters"}), 400
+    user_folder = USERS_DIR / username
+    try:
+        with database_connection() as connection:
+            connection.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (username, generate_password_hash(password)))
+        user_folder.mkdir(mode=0o700)
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "That username already exists"}), 409
+    except OSError:
+        app.logger.exception("Unable to create user folder")
+        with database_connection() as connection:
+            connection.execute("DELETE FROM users WHERE username = ?", (username,))
+        return jsonify({"error": "Could not create the user folder"}), 500
+    app.logger.info("Created user account: %s", username)
+    return jsonify({"username": username}), 201
 
 
 @app.route("/api/share", methods=["POST"])
