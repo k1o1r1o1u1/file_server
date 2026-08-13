@@ -90,6 +90,17 @@ def initialize_database():
         if "quota_bytes" not in columns:
             connection.execute("ALTER TABLE users ADD COLUMN quota_bytes INTEGER")
         connection.execute("CREATE TABLE IF NOT EXISTS trash_items (item_id TEXT PRIMARY KEY, owner TEXT NOT NULL, storage_path TEXT NOT NULL, original_path TEXT NOT NULL, created_at TEXT NOT NULL)")
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS audit_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                role TEXT NOT NULL,
+                action TEXT NOT NULL,
+                details TEXT NOT NULL,
+                remote_address TEXT NOT NULL
+            )
+        """)
 
 
 initialize_database()
@@ -100,6 +111,18 @@ def csrf_token():
     if "csrf_token" not in session:
         session["csrf_token"] = secrets.token_urlsafe(32)
     return session["csrf_token"]
+
+
+def audit_event(action, details="", *, actor=None, role=None):
+    """Record useful activity without logging credentials or sensitive settings."""
+    current_actor = actor or session.get("username", "anonymous")
+    current_role = role or session.get("role", "anonymous")
+    remote_address = request.remote_addr or "unknown"
+    with database_connection() as connection:
+        connection.execute(
+            "INSERT INTO audit_events (created_at, actor, role, action, details, remote_address) VALUES (?, ?, ?, ?, ?, ?)",
+            (datetime.now(timezone.utc).isoformat(), current_actor, current_role, action, details[:500], remote_address),
+        )
 
 
 @app.context_processor
@@ -252,6 +275,7 @@ def login():
             csrf_token()
             session["role"] = "user"
             session["username"] = user["username"]
+            audit_event("login", "User signed in")
             return redirect(url_for("index"))
         app.logger.warning("Failed login attempt")
         flash("Invalid credentials", "error")
@@ -268,6 +292,7 @@ def admin_login():
             csrf_token()
             session["role"] = "admin"
             session["username"] = username
+            audit_event("admin_login", "Administrator signed in")
             return redirect(url_for("index"))
         app.logger.warning("Failed admin login attempt")
         flash("Invalid credentials", "error")
@@ -276,6 +301,7 @@ def admin_login():
 
 @app.route("/logout", methods=["POST"])
 def logout():
+    audit_event("logout", "Signed out")
     session.clear()
     return redirect(url_for("login"))
 
@@ -365,6 +391,7 @@ def download():
     file_path = authenticated_file()
     if file_path is None:
         return redirect(url_for("login"))
+    audit_event("download", str(file_path.relative_to(access_base())).replace(os.sep, "/"))
     return send_file(file_path, as_attachment=True, download_name=file_path.name)
 
 
@@ -385,6 +412,7 @@ def create_folder():
     except OSError:
         app.logger.exception("Unable to create folder")
         return jsonify({"error": "Could not create folder"}), 500
+    audit_event("create_folder", str(destination.relative_to(access_base())).replace(os.sep, "/"))
     return jsonify({"name": name}), 201
 
 
@@ -419,6 +447,7 @@ def upload_file():
     except OSError:
         app.logger.exception("Unable to save uploaded file")
         return jsonify({"error": "Could not save upload"}), 500
+    audit_event("upload", str(destination.relative_to(access_base())).replace(os.sep, "/"))
     return jsonify({"name": destination.name}), 201
 
 
@@ -529,6 +558,20 @@ def admin_users():
         users = connection.execute("SELECT username, enabled, quota_bytes, created_at FROM users ORDER BY username COLLATE NOCASE").fetchall()
     usage = {user["username"]: storage_usage(USERS_DIR / user["username"]) for user in users}
     return render_template("admin_users.html", users=users, user_usage=usage)
+
+
+@app.route("/admin/logs", methods=["GET"])
+def admin_logs():
+    require_admin()
+    page = max(request.args.get("page", 1, type=int), 1)
+    per_page = 100
+    with database_connection() as connection:
+        total = connection.execute("SELECT COUNT(*) FROM audit_events").fetchone()[0]
+        events = connection.execute(
+            "SELECT * FROM audit_events ORDER BY id DESC LIMIT ? OFFSET ?",
+            (per_page, (page - 1) * per_page),
+        ).fetchall()
+    return render_template("admin_logs.html", events=events, page=page, has_next=page * per_page < total)
 
 
 @app.route("/account", methods=["GET"])
@@ -696,6 +739,7 @@ def create_user():
             connection.execute("DELETE FROM users WHERE username = ?", (username,))
         return jsonify({"error": "Could not create the user folder"}), 500
     app.logger.info("Created user account: %s", username)
+    audit_event("create_user", username)
     return jsonify({"username": username}), 201
 
 
@@ -733,6 +777,7 @@ def reset_user_password(username):
     if not updated:
         abort(404)
     app.logger.info("Reset password for user account: %s", username)
+    audit_event("admin_reset_password", username)
     return jsonify({"username": username})
 
 
@@ -750,6 +795,7 @@ def set_user_enabled(username):
     if not updated:
         abort(404)
     app.logger.info("%s user account: %s", "Enabled" if enabled else "Disabled", username)
+    audit_event("enable_user" if enabled else "disable_user", username)
     return jsonify({"username": username, "enabled": enabled})
 
 
@@ -763,6 +809,7 @@ def delete_user(username):
     if not deleted:
         abort(404)
     app.logger.warning("Deleted user account; files retained: %s", username)
+    audit_event("delete_user", username)
     return jsonify({"username": username, "files_retained": True})
 
 

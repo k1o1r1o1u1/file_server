@@ -8,7 +8,7 @@
   <script src="https://unpkg.com/@phosphor-icons/web"></script>
 </head>
 <body class="fm-body">
-<nav class="navbar"><h2><i class="ph-fill ph-shield-check" style="color: var(--primary)"></i> Administrator / <span>Users</span></h2><div class="nav-actions"><a class="btn-logout" href="{{ url_for('admin_trash') }}"><i class="ph ph-trash"></i> Trash</a><a class="btn-logout" href="{{ url_for('index') }}">Back to files</a></div></nav>
+<nav class="navbar"><h2><i class="ph-fill ph-shield-check" style="color: var(--primary)"></i> Administrator / <span>Users</span></h2><div class="nav-actions"><a class="btn-logout" href="{{ url_for('admin_logs') }}"><i class="ph ph-list-checks"></i> Logs</a><a class="btn-logout" href="{{ url_for('admin_trash') }}"><i class="ph ph-trash"></i> Trash</a><a class="btn-logout" href="{{ url_for('index') }}">Back to files</a></div></nav>
 <main class="main-container">
   <section class="glass-panel user-management">
     <h3>Create user</h3><p class="text-muted">Each user receives a private folder and an optional storage limit.</p>
