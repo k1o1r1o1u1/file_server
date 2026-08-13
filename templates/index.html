@@ -15,11 +15,12 @@
 <nav class="navbar animate-fade-in">
   <h2>
     <i class="ph-fill ph-hard-drives" style="color: var(--primary); font-size: 1.5rem;"></i>
-    Nexus / <span>{{ path if path else 'Root' }}</span>
+    Nexus / <span>{{ path if path else (username if not is_admin else 'Root') }}</span>
   </h2>
   <div class="nav-actions">
     {% if is_admin %}<a class="btn-logout" href="{{ url_for('admin_users') }}"><i class="ph ph-users"></i> Users</a>{% endif %}
     <a class="btn-logout" href="{{ url_for('user_trash') }}"><i class="ph ph-trash"></i> Trash</a>
+    {% if not is_admin %}<a class="btn-logout" href="{{ url_for('account_settings') }}"><i class="ph ph-gear"></i> Account</a>{% endif %}
     <form method="post" action="{{ url_for('logout') }}" class="logout-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn-logout" type="submit"><i class="ph ph-sign-out"></i> Logout{% if username %} ({{ username }}){% endif %}</button></form>
   </div>
 </nav>

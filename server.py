@@ -499,6 +499,35 @@ def admin_users():
     return render_template("admin_users.html", users=users, user_usage=usage)
 
 
+@app.route("/account", methods=["GET"])
+def account_settings():
+    require_login()
+    if session.get("role") == "admin":
+        return redirect(url_for("admin_users"))
+    return render_template("account.html", username=session["username"])
+
+
+@app.route("/api/account/password", methods=["POST"])
+def change_own_password():
+    require_login()
+    if session.get("role") == "admin":
+        abort(403)
+    payload = request.get_json(silent=True) or {}
+    current_password = payload.get("current_password", "")
+    new_password = payload.get("new_password", "")
+    if not isinstance(new_password, str) or len(new_password) < 10:
+        return jsonify({"error": "New password must be at least 10 characters"}), 400
+    with database_connection() as connection:
+        user = connection.execute("SELECT password_hash FROM users WHERE username = ? AND enabled = 1", (session["username"],)).fetchone()
+        if user is None or not check_password_hash(user["password_hash"], current_password):
+            app.logger.warning("Failed password-change verification")
+            return jsonify({"error": "Current password is incorrect"}), 400
+        connection.execute("UPDATE users SET password_hash = ? WHERE username = ?", (generate_password_hash(new_password), session["username"]))
+    session.clear()
+    app.logger.info("User changed own password")
+    return jsonify({"changed": True})
+
+
 def format_size(size):
     for unit in ("B", "KB", "MB", "GB", "TB"):
         if size < 1024 or unit == "TB":
