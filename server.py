@@ -554,6 +554,38 @@ def trash_item():
     return jsonify({"name": source.name})
 
 
+@app.route("/api/batch-trash", methods=["POST"])
+def batch_trash_items():
+    require_login()
+    payload = request.get_json(silent=True) or {}
+    parent_path = safe_path(payload.get("path", ""))
+    names = payload.get("names", [])
+    if not isinstance(names, list):
+        return jsonify({"error": "Invalid payload"}), 400
+    
+    owner = session.get("username", "admin")
+    destination_dir = TRASH_DIR / owner
+    destination_dir.mkdir(mode=0o700, exist_ok=True)
+    
+    count = 0
+    for name in names:
+        try:
+            source = contained_path(parent_path, safe_filename(name))
+            item_id = secrets.token_hex(16)
+            destination = destination_dir / f"{item_id}_{source.name}"
+            original_path = str(source.relative_to(access_base())).replace(os.sep, "/")
+            shutil.move(str(source), str(destination))
+            with database_connection() as connection:
+                connection.execute("INSERT INTO trash_items VALUES (?, ?, ?, ?, ?)", (item_id, owner, str(destination.relative_to(TRASH_DIR)).replace(os.sep, "/"), original_path, datetime.now(timezone.utc).isoformat()))
+            count += 1
+        except Exception:
+            continue
+            
+    if count == 0 and names:
+        return jsonify({"error": "Could not trash items"}), 500
+    return jsonify({"trashed": count})
+
+
 @app.route("/zip")
 def download_folder_zip():
     require_login()

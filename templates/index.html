@@ -108,6 +108,7 @@
     {% for f in folders %}
       <li class="file-item">
         <div class="file-info">
+          <input type="checkbox" class="item-checkbox" value="{{f}}" onchange="updateBatchSelection()" style="margin-right: 10px;">
           <i class="ph-fill ph-folder icon-folder"></i>
           <a href="{{ url_for('index', path=(path + '/' + f) if path else f) }}">{{f}}</a>
         </div>
@@ -135,6 +136,7 @@
       
       <li class="file-item {% if is_image %}file-item-image{% endif %}">
         <div class="file-info">
+          <input type="checkbox" class="item-checkbox" value="{{f}}" onchange="updateBatchSelection()" style="margin-right: 10px;">
           {% if is_image %}
             <i class="ph-duotone ph-image icon-image"></i>
           {% elif is_video %}
@@ -178,6 +180,14 @@
     </ul>
   </div>
 
+</div>
+
+<div id="batchActionBar" class="glass-panel" style="display: none; position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); padding: 15px 30px; z-index: 1000; align-items: center; gap: 20px; border-radius: 50px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+  <span id="batchCount" style="font-weight: bold; font-size: 1.1em; color: var(--text-color);">0 selected</span>
+  <div style="display: flex; gap: 10px;">
+    <button class="action-btn danger-btn" onclick="batchTrash()"><i class="ph ph-trash"></i> Delete</button>
+    <button class="action-btn tool-btn" onclick="clearBatchSelection()"><i class="ph ph-x"></i> Cancel</button>
+  </div>
 </div>
 
 <!-- New Folder Modal -->
@@ -446,6 +456,35 @@
     if (!confirm(`Move ${name} to trash?`)) return;
     try { await fileApi('/api/trash', {path: currentPath, name}); location.reload(); }
     catch (error) { alert(error.message); }
+  }
+
+  // Batch Actions
+  function updateBatchSelection() {
+    const checkboxes = document.querySelectorAll('.item-checkbox:checked');
+    const bar = document.getElementById('batchActionBar');
+    if (checkboxes.length > 0) {
+      document.getElementById('batchCount').innerText = `${checkboxes.length} selected`;
+      bar.style.display = 'flex';
+    } else {
+      bar.style.display = 'none';
+    }
+  }
+
+  function clearBatchSelection() {
+    document.querySelectorAll('.item-checkbox').forEach(cb => cb.checked = false);
+    updateBatchSelection();
+  }
+
+  async function batchTrash() {
+    const checkboxes = document.querySelectorAll('.item-checkbox:checked');
+    const items = Array.from(checkboxes).map(cb => cb.value);
+    if (!confirm(`Move ${items.length} items to trash?`)) return;
+    try {
+      await fileApi('/api/batch-trash', { path: currentPath, names: items });
+      location.reload();
+    } catch (error) {
+      alert(error.message);
+    }
   }
 
   // Drag and Drop
