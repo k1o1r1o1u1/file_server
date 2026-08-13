@@ -15,7 +15,18 @@
 <nav class="navbar animate-fade-in">
   <h2>
     <i class="ph-fill ph-hard-drives" style="color: var(--primary); font-size: 1.5rem;"></i>
-    Nexus / <span>{{ path if path else (username if not is_admin else 'Root') }}</span>
+    Nexus
+    {% if not path %}
+      / <span>{{ username if not is_admin else 'Root' }}</span>
+    {% else %}
+      / <a href="{{ url_for('index') }}" style="color: inherit; text-decoration: none;" class="breadcrumb-link">{{ username if not is_admin else 'Root' }}</a>
+      {% set path_parts = path.split('/') %}
+      {% set current_accum = [] %}
+      {% for part in path_parts %}
+        {% set _ = current_accum.append(part) %}
+        / <a href="{{ url_for('index', path='/'.join(current_accum)) }}" style="color: inherit; text-decoration: none;" class="breadcrumb-link">{{ part }}</a>
+      {% endfor %}
+    {% endif %}
   </h2>
   <div class="nav-actions">
     {% if is_admin %}<a class="btn-logout" href="{{ url_for('admin_users') }}"><i class="ph ph-users"></i> Users</a><a class="btn-logout" href="{{ url_for('admin_logs') }}"><i class="ph ph-list-checks"></i> Logs</a>{% endif %}
@@ -25,7 +36,7 @@
   </div>
 </nav>
 
-<div class="main-container animate-fade-in" style="animation-delay: 0.1s;">
+<div id="dropZone" class="main-container animate-fade-in" style="animation-delay: 0.1s;">
 
   {% if not is_admin and quota_bytes is not none %}
   <div class="quota-panel glass-panel">
@@ -52,13 +63,26 @@
   {% endwith %}
 
   <div class="glass-panel" style="padding: 10px;">
-    <div class="file-tools">
-      <button class="action-btn tool-btn" onclick="openFolderModal()"><i class="ph ph-folder-plus"></i> New folder</button>
-      <label class="action-btn tool-btn upload-label" for="uploadFile"><i class="ph ph-upload-simple"></i> Upload file</label>
-      <input id="uploadFile" type="file" multiple hidden onchange="uploadFiles(this.files)">
-      <label class="action-btn tool-btn upload-label" for="uploadFolder"><i class="ph ph-folder-arrow-up"></i> Upload folder</label>
-      <input id="uploadFolder" type="file" webkitdirectory multiple hidden onchange="uploadFiles(this.files)">
-      {% if path %}<a class="action-btn tool-btn" href="{{ url_for('download_folder_zip', path=path) }}"><i class="ph ph-file-zip"></i> Download folder</a>{% endif %}
+    <div class="file-tools" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+      <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+        <button class="action-btn tool-btn" onclick="openFolderModal()"><i class="ph ph-folder-plus"></i> New folder</button>
+        <label class="action-btn tool-btn upload-label" for="uploadFile"><i class="ph ph-upload-simple"></i> Upload file</label>
+        <input id="uploadFile" type="file" multiple hidden onchange="uploadFiles(this.files)">
+        <label class="action-btn tool-btn upload-label" for="uploadFolder"><i class="ph ph-folder-arrow-up"></i> Upload folder</label>
+        <input id="uploadFolder" type="file" webkitdirectory multiple hidden onchange="uploadFiles(this.files)">
+        {% if path %}<a class="action-btn tool-btn" href="{{ url_for('download_folder_zip', path=path) }}"><i class="ph ph-file-zip"></i> Download folder</a>{% endif %}
+      </div>
+      <div style="display: flex; align-items: center; gap: 5px;">
+        <i class="ph ph-sort-ascending" style="color: var(--text-muted);"></i>
+        <select onchange="window.location.href='?path=' + encodeURIComponent(currentPath) + '&sort=' + this.value" class="action-btn tool-btn" style="padding: 6px; border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; background: rgba(0,0,0,0.2); color: var(--text-color); cursor: pointer; outline: none;">
+          <option value="name_asc" style="background: var(--bg-dark);" {% if current_sort == 'name_asc' %}selected{% endif %}>Name (A-Z)</option>
+          <option value="name_desc" style="background: var(--bg-dark);" {% if current_sort == 'name_desc' %}selected{% endif %}>Name (Z-A)</option>
+          <option value="size_desc" style="background: var(--bg-dark);" {% if current_sort == 'size_desc' %}selected{% endif %}>Size (Largest)</option>
+          <option value="size_asc" style="background: var(--bg-dark);" {% if current_sort == 'size_asc' %}selected{% endif %}>Size (Smallest)</option>
+          <option value="date_desc" style="background: var(--bg-dark);" {% if current_sort == 'date_desc' %}selected{% endif %}>Date (Newest)</option>
+          <option value="date_asc" style="background: var(--bg-dark);" {% if current_sort == 'date_asc' %}selected{% endif %}>Date (Oldest)</option>
+        </select>
+      </div>
     </div>
     <div id="uploadStatus" class="upload-status" aria-live="polite" hidden>
       <div class="upload-status-row">
@@ -103,23 +127,37 @@
     {% for f in files %}
       {% set ext = f.rsplit('.', 1)[-1].lower() if '.' in f else '' %}
       {% set is_image = ext in ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'] %}
+      {% set is_video = ext in ['mp4', 'webm'] %}
+      {% set is_audio = ext in ['mp3', 'wav', 'ogg'] %}
+      {% set is_text = ext in ['txt', 'md', 'py', 'js', 'html', 'css', 'json', 'csv', 'log'] %}
+      {% set is_pdf = ext == 'pdf' %}
+      {% set is_previewable = is_image or is_video or is_audio or is_text or is_pdf %}
+      
       <li class="file-item {% if is_image %}file-item-image{% endif %}">
         <div class="file-info">
           {% if is_image %}
             <i class="ph-duotone ph-image icon-image"></i>
+          {% elif is_video %}
+            <i class="ph-duotone ph-video-camera icon-file"></i>
+          {% elif is_audio %}
+            <i class="ph-duotone ph-music-notes icon-file"></i>
+          {% elif is_pdf %}
+            <i class="ph-duotone ph-file-pdf icon-file"></i>
+          {% elif is_text %}
+            <i class="ph-duotone ph-file-text icon-file"></i>
           {% else %}
             <i class="ph-duotone ph-file icon-file"></i>
           {% endif %}
           <span>{{f}}</span>
         </div>
         {% if is_image %}
-        <div class="image-preview-thumb" onclick='openPreview({{ url_for("view", path=path, file=f)|tojson }}, {{ f|tojson }})'>
+        <div class="image-preview-thumb" onclick='openPreview({{ url_for("view", path=path, file=f)|tojson }}, {{ f|tojson }}, {{ ext|tojson }})'>
           <img src="{{ url_for('view', path=path, file=f) }}" alt="{{f}}" loading="lazy">
         </div>
         {% endif %}
         <div class="file-actions">
-          {% if is_image %}
-          <button class="action-btn" onclick='openPreview({{ url_for("view", path=path, file=f)|tojson }}, {{ f|tojson }})'>
+          {% if is_previewable %}
+          <button class="action-btn" onclick='openPreview({{ url_for("view", path=path, file=f)|tojson }}, {{ f|tojson }}, {{ ext|tojson }})'>
             <i class="ph ph-eye"></i> Preview
           </button>
           {% else %}
@@ -157,8 +195,7 @@
   <div class="preview-modal-content">
     <span class="close-btn" onclick="closePreviewModal()">&times;</span>
     <h3 id="previewFileName" class="preview-title"></h3>
-    <div class="preview-image-container">
-      <img id="previewImage" src="" alt="Preview">
+    <div id="previewContainer" class="preview-image-container" style="display: flex; justify-content: center; align-items: center; width: 100%;">
     </div>
   </div>
 </div>
@@ -182,16 +219,31 @@
 </div>
 
 <script>
-  // Image Preview
-  function openPreview(src, name) {
-    document.getElementById('previewImage').src = src;
+  // Media Preview
+  function openPreview(src, name, ext) {
+    const container = document.getElementById('previewContainer');
     document.getElementById('previewFileName').innerText = name;
+    
+    let html = '';
+    if (['mp4', 'webm'].includes(ext)) {
+      html = `<video controls autoplay style="max-width: 100%; max-height: 70vh;"><source src="${src}" type="video/${ext}"></video>`;
+    } else if (['mp3', 'wav', 'ogg'].includes(ext)) {
+      html = `<audio controls autoplay style="width: 100%; margin-top: 20px;"><source src="${src}" type="audio/${ext}"></audio>`;
+    } else if (ext === 'pdf') {
+      html = `<iframe src="${src}" style="width: 100%; height: 70vh; border: none;"></iframe>`;
+    } else if (['txt', 'md', 'py', 'js', 'html', 'css', 'json', 'csv', 'log'].includes(ext)) {
+      html = `<iframe src="${src}" style="width: 100%; height: 70vh; border: none; background: white;"></iframe>`;
+    } else {
+      html = `<img id="previewImage" src="${src}" alt="Preview">`;
+    }
+    
+    container.innerHTML = html;
     document.getElementById('previewModal').style.display = 'flex';
   }
 
   function closePreviewModal() {
     document.getElementById('previewModal').style.display = 'none';
-    document.getElementById('previewImage').src = '';
+    document.getElementById('previewContainer').innerHTML = '';
   }
 
   function closePreview(event) {
@@ -389,6 +441,58 @@
     try { await fileApi('/api/trash', {path: currentPath, name}); location.reload(); }
     catch (error) { alert(error.message); }
   }
+
+  // Drag and Drop
+  const dropZone = document.getElementById('dropZone');
+  dropZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropZone.style.border = '2px dashed var(--primary)';
+    dropZone.style.background = 'rgba(255,255,255,0.05)';
+  });
+  dropZone.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    dropZone.style.border = 'none';
+    dropZone.style.background = 'none';
+  });
+  dropZone.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    dropZone.style.border = 'none';
+    dropZone.style.background = 'none';
+    
+    const items = e.dataTransfer.items;
+    if (!items) return;
+    
+    const filesToUpload = [];
+    async function traverseEntry(entry, path) {
+      if (entry.isFile) {
+        const file = await new Promise(resolve => entry.file(resolve));
+        if (path) {
+          Object.defineProperty(file, 'webkitRelativePath', { value: path + file.name });
+        }
+        filesToUpload.push(file);
+      } else if (entry.isDirectory) {
+        const dirReader = entry.createReader();
+        const entries = await new Promise(resolve => dirReader.readEntries(resolve));
+        for (const child of entries) {
+          await traverseEntry(child, path + entry.name + '/');
+        }
+      }
+    }
+    
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind === 'file') {
+        const entry = item.webkitGetAsEntry();
+        if (entry) await traverseEntry(entry, '');
+      }
+    }
+    
+    if (filesToUpload.length > 0) {
+      uploadCancelled = false;
+      document.getElementById('cancelUploadBtn').style.display = 'inline-block';
+      uploadNext(filesToUpload, 0, 0);
+    }
+  });
 </script>
 
 </body>

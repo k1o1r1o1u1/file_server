@@ -212,7 +212,7 @@ def shared_link(token):
     return link
 
 
-def list_directory(directory):
+def list_directory(directory, sort_by="name_asc"):
     folders, files = [], []
     for entry in directory.iterdir():
         # Never list links that resolve outside the directory being exposed.
@@ -221,11 +221,37 @@ def list_directory(directory):
             resolved.relative_to(directory)
         except (OSError, RuntimeError, ValueError):
             continue
+            
+        try:
+            stat = resolved.stat()
+        except OSError:
+            continue
+            
+        item = {
+            "name": entry.name,
+            "size": stat.st_size,
+            "mtime": stat.st_mtime
+        }
+        
         if resolved.is_dir():
-            folders.append(entry.name)
+            folders.append(item)
         elif resolved.is_file():
-            files.append(entry.name)
-    return sorted(folders, key=str.lower), sorted(files, key=str.lower)
+            files.append(item)
+            
+    if sort_by == "name_desc":
+        key, rev = lambda x: x["name"].lower(), True
+    elif sort_by == "size_asc":
+        key, rev = lambda x: x["size"], False
+    elif sort_by == "size_desc":
+        key, rev = lambda x: x["size"], True
+    elif sort_by == "date_asc":
+        key, rev = lambda x: x["mtime"], False
+    elif sort_by == "date_desc":
+        key, rev = lambda x: x["mtime"], True
+    else: # name_asc
+        key, rev = lambda x: x["name"].lower(), False
+
+    return [f["name"] for f in sorted(folders, key=key, reverse=rev)], [f["name"] for f in sorted(files, key=key, reverse=rev)]
 
 
 def storage_usage(directory):
@@ -311,10 +337,11 @@ def index():
     if not session.get("role"):
         return redirect(url_for("login"))
     rel_path = request.args.get("path", "")
+    sort_by = request.args.get("sort", "name_asc")
     current_path = safe_path(rel_path)
-    folders, files = list_directory(current_path)
+    folders, files = list_directory(current_path, sort_by=sort_by)
     usage, quota = quota_information()
-    return render_template("index.html", folders=folders, files=files, path=rel_path, parent=relative_parent(rel_path), is_admin=session.get("role") == "admin", username=session.get("username"), usage_bytes=usage, quota_bytes=quota)
+    return render_template("index.html", folders=folders, files=files, path=rel_path, parent=relative_parent(rel_path), is_admin=session.get("role") == "admin", username=session.get("username"), usage_bytes=usage, quota_bytes=quota, current_sort=sort_by)
 
 
 def authenticated_file():
