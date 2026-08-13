@@ -55,7 +55,7 @@
     <div class="file-tools">
       <button class="action-btn tool-btn" onclick="openFolderModal()"><i class="ph ph-folder-plus"></i> New folder</button>
       <label class="action-btn tool-btn upload-label" for="uploadFile"><i class="ph ph-upload-simple"></i> Upload file</label>
-      <input id="uploadFile" type="file" hidden onchange="uploadFile(this.files[0])">
+      <input id="uploadFile" type="file" multiple hidden onchange="uploadFiles(this.files)">
       {% if path %}<a class="action-btn tool-btn" href="{{ url_for('download_folder_zip', path=path) }}"><i class="ph ph-file-zip"></i> Download folder</a>{% endif %}
     </div>
     <div id="uploadStatus" class="upload-status" aria-live="polite" hidden>
@@ -277,7 +277,15 @@
     else alert(data.error || 'Could not create folder');
   }
 
-  function uploadFile(file) {
+  function uploadFiles(fileList) {
+    const files = Array.from(fileList);
+    if (!files.length) return;
+    uploadNext(files, 0, 0);
+  }
+
+  function uploadNext(files, index, completed) {
+    const file = files[index];
+    if (!file) return;
     if (!file) return;
     const status = document.getElementById('uploadStatus');
     const message = document.getElementById('uploadMessage');
@@ -290,7 +298,7 @@
     form.append('file', file);
     const startedAt = performance.now();
     status.hidden = false;
-    message.textContent = `Uploading ${file.name}`;
+    message.textContent = `Uploading ${index + 1} of ${files.length}: ${file.name}`;
     percent.textContent = '0%'; bar.style.width = '0%'; speed.textContent = ''; bar.classList.remove('progress-error');
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/upload');
@@ -311,13 +319,19 @@
       let data = {};
       try { data = JSON.parse(xhr.responseText); } catch (_) {}
       if (xhr.status >= 200 && xhr.status < 300) {
-        message.textContent = 'Upload complete'; percent.textContent = '100%'; bar.style.width = '100%';
-        setTimeout(() => location.reload(), 400);
+        const totalCompleted = completed + 1;
+        if (index + 1 < files.length) {
+          uploadNext(files, index + 1, totalCompleted);
+        } else {
+          message.textContent = `${totalCompleted} file${totalCompleted === 1 ? '' : 's'} uploaded successfully`;
+          percent.textContent = '100%'; bar.style.width = '100%';
+          setTimeout(() => location.reload(), 600);
+        }
       } else {
-        message.textContent = data.error || 'Upload failed'; speed.textContent = ''; bar.classList.add('progress-error');
+        message.textContent = `${file.name}: ${data.error || 'Upload failed'}. ${completed} uploaded.`; speed.textContent = ''; bar.classList.add('progress-error');
       }
     };
-    xhr.onerror = () => { message.textContent = 'Upload failed: network error'; speed.textContent = ''; bar.classList.add('progress-error'); };
+    xhr.onerror = () => { message.textContent = `${file.name}: upload failed due to a network error`; speed.textContent = ''; bar.classList.add('progress-error'); };
     xhr.send(form);
   }
 

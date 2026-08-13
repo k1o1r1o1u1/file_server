@@ -300,6 +300,8 @@ button:active {
   transition: all 0.2s ease;
 }
 
+.file-info span { overflow-wrap: anywhere; }
+
 .file-item:hover {
   background: rgba(255, 255, 255, 0.06);
   border-color: var(--glass-border);
@@ -530,6 +532,10 @@ input[type="file"]::file-selector-button:hover {
     gap: 8px;
   }
 
+  .nav-actions { gap: 5px; }
+  .btn-logout { padding: 7px 9px; font-size: 0.76rem; }
+  .btn-logout i { display: none; }
+
   .main-container {
     margin: 16px auto;
     padding: 0 10px;
@@ -560,6 +566,20 @@ input[type="file"]::file-selector-button:hover {
     padding: 10px 8px;
     font-size: 0.8rem;
   }
+
+  .file-tools { flex-wrap: wrap; }
+  .tool-btn { flex: 1 1 130px; justify-content: center; }
+  .quota-panel { margin: 0 0 14px; padding: 12px; }
+  .upload-status { margin: 0 4px 12px; }
+  .upload-status-row { font-size: 0.85rem; }
+  .user-management { padding: 16px; }
+  .user-card { padding: 14px; }
+  .user-card-heading, .quota-summary, .trash-heading { align-items: flex-start; flex-direction: column; }
+  .user-card-actions, .trash-meta { width: 100%; justify-content: flex-start; }
+  .user-card-actions .action-btn, .trash-meta .action-btn { flex: 1 1 130px; justify-content: center; }
+  .quota-editor { align-items: stretch; }
+  .quota-editor select, .quota-editor input { width: 100%; max-width: none; }
+  .trash-heading .action-btn { width: 100%; }
 
   .image-preview-thumb {
     max-height: 160px;
