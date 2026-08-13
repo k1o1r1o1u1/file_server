@@ -61,9 +61,15 @@
       {% if path %}<a class="action-btn tool-btn" href="{{ url_for('download_folder_zip', path=path) }}"><i class="ph ph-file-zip"></i> Download folder</a>{% endif %}
     </div>
     <div id="uploadStatus" class="upload-status" aria-live="polite" hidden>
-      <div class="upload-status-row"><span id="uploadMessage">Preparing upload…</span><span id="uploadPercent">0%</span></div>
+      <div class="upload-status-row">
+        <span id="uploadMessage">Preparing upload…</span>
+        <span id="uploadPercent">0%</span>
+      </div>
       <div class="progress-track"><div id="uploadProgress" class="progress-bar"></div></div>
-      <span id="uploadSpeed" class="text-muted"></span>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 5px;">
+        <span id="uploadSpeed" class="text-muted"></span>
+        <button id="cancelUploadBtn" class="action-btn danger-btn" onclick="cancelUpload()" style="display: none; padding: 2px 8px; font-size: 0.85em;">Cancel</button>
+      </div>
     </div>
     <ul class="file-list">
     {% if parent is not none %}
@@ -279,15 +285,30 @@
     else alert(data.error || 'Could not create folder');
   }
 
+  let currentUploadXhr = null;
+  let uploadCancelled = false;
+
+  function cancelUpload() {
+    uploadCancelled = true;
+    if (currentUploadXhr) currentUploadXhr.abort();
+    document.getElementById('uploadMessage').textContent = 'Upload cancelled.';
+    document.getElementById('uploadSpeed').textContent = '';
+    document.getElementById('uploadProgress').classList.add('progress-error');
+    document.getElementById('cancelUploadBtn').style.display = 'none';
+    setTimeout(() => location.reload(), 1500);
+  }
+
   function uploadFiles(fileList) {
     const files = Array.from(fileList);
     if (!files.length) return;
+    uploadCancelled = false;
+    document.getElementById('cancelUploadBtn').style.display = 'inline-block';
     uploadNext(files, 0, 0);
   }
 
   function uploadNext(files, index, completed) {
+    if (uploadCancelled) return;
     const file = files[index];
-    if (!file) return;
     if (!file) return;
     const status = document.getElementById('uploadStatus');
     const message = document.getElementById('uploadMessage');
@@ -304,6 +325,7 @@
     message.textContent = `Uploading ${index + 1} of ${files.length}: ${file.name}`;
     percent.textContent = '0%'; bar.style.width = '0%'; speed.textContent = ''; bar.classList.remove('progress-error');
     const xhr = new XMLHttpRequest();
+    currentUploadXhr = xhr;
     xhr.open('POST', '/api/upload');
     xhr.setRequestHeader('X-CSRF-Token', {{ csrf_token|tojson }});
     xhr.upload.onprogress = (event) => {
@@ -318,6 +340,7 @@
       speed.textContent = `${value.toFixed(value >= 100 || unit === 0 ? 0 : 1)} ${units[unit]}`;
     };
     xhr.onload = () => {
+      if (uploadCancelled) return;
       input.value = '';
       let data = {};
       try { data = JSON.parse(xhr.responseText); } catch (_) {}
@@ -328,13 +351,14 @@
         } else {
           message.textContent = `${totalCompleted} file${totalCompleted === 1 ? '' : 's'} uploaded successfully`;
           percent.textContent = '100%'; bar.style.width = '100%';
+          document.getElementById('cancelUploadBtn').style.display = 'none';
           setTimeout(() => location.reload(), 600);
         }
       } else {
         message.textContent = `${file.name}: ${data.error || 'Upload failed'}. ${completed} uploaded.`; speed.textContent = ''; bar.classList.add('progress-error');
       }
     };
-    xhr.onerror = () => { message.textContent = `${file.name}: upload failed due to a network error`; speed.textContent = ''; bar.classList.add('progress-error'); };
+    xhr.onerror = () => { if (uploadCancelled) return; message.textContent = `${file.name}: upload failed due to a network error`; speed.textContent = ''; bar.classList.add('progress-error'); };
     xhr.send(form);
   }
 
