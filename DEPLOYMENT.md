@@ -105,6 +105,13 @@ Uploading a folder from supported browsers preserves its internal folder
 structure below the current directory. A folder upload is still subject to the
 user's quota and available server disk space.
 
+Gunicorn runs as one low-memory `gthread` worker with four threads. This lets
+other users browse, log in, download, or start their own request while one user
+has a large upload in progress. It is intentionally not multiple worker
+processes, which would use more RAM on this 4 GB server. If the machine feels
+slow under several simultaneous transfers, reduce `FILESERVER_THREADS` in
+`.env` to `2` and restart the service.
+
 ## User accounts and administrator
 
 `/admin/login` is the administrator login. Its credentials remain the

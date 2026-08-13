@@ -23,6 +23,8 @@ set +a
 
 exec .venv/bin/gunicorn \
   --workers 1 \
+  --worker-class gthread \
+  --threads "${FILESERVER_THREADS:-4}" \
   --timeout "${FILESERVER_TIMEOUT:-0}" \
   --bind "${FILESERVER_BIND:-0.0.0.0:8888}" \
   --access-logfile - \
