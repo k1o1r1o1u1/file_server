@@ -298,7 +298,7 @@
     const form = new FormData();
     form.append('path', currentPath);
     form.append('relative_path', file.webkitRelativePath || '');
-    form.append('file', file);
+    form.append('file', file, file.name);
     const startedAt = performance.now();
     status.hidden = false;
     message.textContent = `Uploading ${index + 1} of ${files.length}: ${file.name}`;
