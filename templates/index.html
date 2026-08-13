@@ -131,7 +131,7 @@
       {% set is_audio = ext in ['mp3', 'wav', 'ogg'] %}
       {% set is_text = ext in ['txt', 'md', 'py', 'js', 'html', 'css', 'json', 'csv', 'log'] %}
       {% set is_pdf = ext == 'pdf' %}
-      {% set is_previewable = is_image or is_video or is_audio or is_text or is_pdf %}
+      {% set is_previewable = is_image or is_video or is_audio or is_text %}
       
       <li class="file-item {% if is_image %}file-item-image{% endif %}">
         <div class="file-info">
@@ -194,7 +194,12 @@
 <div id="previewModal" class="modal" onclick="closePreview(event)">
   <div class="preview-modal-content">
     <span class="close-btn" onclick="closePreviewModal()">&times;</span>
-    <h3 id="previewFileName" class="preview-title"></h3>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; margin-right: 30px;">
+      <h3 id="previewFileName" class="preview-title" style="margin: 0; word-break: break-all;"></h3>
+      <a id="previewNewTabLink" href="" target="_blank" class="action-btn" style="text-decoration: none; white-space: nowrap;">
+        <i class="ph ph-arrow-square-out"></i> Open in New Tab
+      </a>
+    </div>
     <div id="previewContainer" class="preview-image-container" style="display: flex; justify-content: center; align-items: center; width: 100%;">
     </div>
   </div>
@@ -223,6 +228,7 @@
   function openPreview(src, name, ext) {
     const container = document.getElementById('previewContainer');
     document.getElementById('previewFileName').innerText = name;
+    document.getElementById('previewNewTabLink').href = src;
     
     let html = '';
     if (['mp4', 'webm'].includes(ext)) {
