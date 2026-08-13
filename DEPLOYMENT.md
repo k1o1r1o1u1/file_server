@@ -97,6 +97,14 @@ Uploads cannot overwrite an existing file and reject path-like filenames. The
 browser shows upload progress and approximate speed; available disk space and
 any outer web-server limit determine the maximum upload size.
 
+There is no application file-size limit. Gunicorn's worker timeout is disabled
+(`--timeout 0`) so large uploads can run for as long as an active LAN/Tailscale
+connection needs. This is appropriate for this private, authenticated server,
+but one slow or stalled upload uses its single worker until the connection ends.
+Uploading a folder from supported browsers preserves its internal folder
+structure below the current directory. A folder upload is still subject to the
+user's quota and available server disk space.
+
 ## User accounts and administrator
 
 `/admin/login` is the administrator login. Its credentials remain the

@@ -617,6 +617,101 @@ input[type="file"]::file-selector-button:hover {
   }
 }
 
+/* Phone layout: keep navigation and controls readable without horizontal overflow. */
+@media (max-width: 600px) {
+  .login-body {
+    min-height: 100dvh;
+    justify-content: flex-start;
+    padding: 56px 16px 24px;
+    box-sizing: border-box;
+  }
+
+  .login-card {
+    max-width: none;
+    width: 100%;
+    padding: 28px 20px;
+    box-sizing: border-box;
+  }
+
+  .login-icon { font-size: 42px; margin-bottom: 10px; }
+  .login-card h2 { margin-bottom: 16px !important; font-size: 1.65rem; }
+
+  .navbar {
+    position: static;
+    align-items: stretch;
+    padding: 12px;
+    gap: 10px;
+  }
+
+  .navbar h2 {
+    width: 100%;
+    min-width: 0;
+    font-size: 1.05rem;
+    overflow: hidden;
+  }
+
+  .navbar h2 span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .nav-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+    gap: 6px;
+  }
+
+  .nav-actions > a,
+  .nav-actions .logout-form,
+  .nav-actions .logout-form .btn-logout {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  .btn-logout {
+    min-height: 40px;
+    padding: 7px 5px;
+    justify-content: center;
+    text-align: center;
+    line-height: 1.1;
+    font-size: 0.72rem;
+    white-space: normal;
+  }
+
+  .main-container { margin: 14px auto; padding: 0 12px; }
+  .glass-panel { border-radius: 14px; }
+
+  .file-tools {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 8px;
+    gap: 8px;
+  }
+
+  .file-tools .tool-btn { min-width: 0; width: 100%; }
+  .file-tools .tool-btn:nth-child(3) { grid-column: 1 / -1; }
+
+  .file-item { padding: 12px; gap: 10px; }
+  .file-info { width: 100%; }
+  .file-info span, .file-info a { white-space: normal; overflow: visible; text-overflow: clip; word-break: break-word; }
+
+  .file-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .file-actions .action-btn { width: 100%; min-width: 0; }
+  .quota-panel { padding: 12px; }
+  .quota-panel .upload-status-row { font-size: 0.78rem; }
+
+  .modal { padding: 12px; box-sizing: border-box; }
+  .modal-content { width: 100%; padding: 24px 16px; }
+}
+
 /* =========================================
    MODAL (SHARE)
    ========================================= */
@@ -683,4 +778,11 @@ input[type="file"]::file-selector-button:hover {
 .copy-btn {
   width: auto;
   white-space: nowrap;
+}
+
+/* Must remain last: the share-modal desktop rules above otherwise override it. */
+@media (max-width: 600px) {
+  .modal-content { width: 100%; max-width: none; padding: 24px 16px; }
+  .link-container { flex-direction: column; }
+  .copy-btn { width: 100%; }
 }

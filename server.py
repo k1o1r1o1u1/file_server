@@ -319,6 +319,29 @@ def upload_filename(filename):
     return sanitized
 
 
+def upload_destination(folder, uploaded, relative_path):
+    """Return a safe destination for a file or a browser-selected folder upload."""
+    filename = upload_filename(uploaded.filename)
+    if not relative_path:
+        return folder / filename
+    relative = reject_unsafe_relative_path(relative_path)
+    if relative.name != uploaded.filename or len(relative.parts) < 2:
+        abort(400, description="Invalid folder upload path")
+    # Browser directory uploads send a relative path such as Photos/2026/a.jpg.
+    # Create only directories below the already-authorized target folder.
+    destination = folder / relative
+    try:
+        destination.resolve(strict=False).relative_to(folder.resolve())
+    except ValueError:
+        abort(403)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        destination.parent.resolve(strict=True).relative_to(folder.resolve())
+    except ValueError:
+        abort(403)
+    return destination
+
+
 @app.route("/view")
 def view():
     file_path = authenticated_file()
@@ -362,8 +385,7 @@ def upload_file():
     uploaded = request.files.get("file")
     if uploaded is None or not uploaded.filename:
         return jsonify({"error": "Choose a file to upload"}), 400
-    filename = upload_filename(uploaded.filename)
-    destination = folder / filename
+    destination = upload_destination(folder, uploaded, request.form.get("relative_path", ""))
     remaining_quota = None
     if session.get("role") == "user":
         quota = user_quota(session["username"])
@@ -387,7 +409,7 @@ def upload_file():
     except OSError:
         app.logger.exception("Unable to save uploaded file")
         return jsonify({"error": "Could not save upload"}), 500
-    return jsonify({"name": filename}), 201
+    return jsonify({"name": destination.name}), 201
 
 
 def item_from_request(payload):

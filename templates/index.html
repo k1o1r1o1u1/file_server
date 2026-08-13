@@ -56,6 +56,8 @@
       <button class="action-btn tool-btn" onclick="openFolderModal()"><i class="ph ph-folder-plus"></i> New folder</button>
       <label class="action-btn tool-btn upload-label" for="uploadFile"><i class="ph ph-upload-simple"></i> Upload file</label>
       <input id="uploadFile" type="file" multiple hidden onchange="uploadFiles(this.files)">
+      <label class="action-btn tool-btn upload-label" for="uploadFolder"><i class="ph ph-folder-arrow-up"></i> Upload folder</label>
+      <input id="uploadFolder" type="file" webkitdirectory directory multiple hidden onchange="uploadFiles(this.files)">
       {% if path %}<a class="action-btn tool-btn" href="{{ url_for('download_folder_zip', path=path) }}"><i class="ph ph-file-zip"></i> Download folder</a>{% endif %}
     </div>
     <div id="uploadStatus" class="upload-status" aria-live="polite" hidden>
@@ -295,6 +297,7 @@
     const input = document.getElementById('uploadFile');
     const form = new FormData();
     form.append('path', currentPath);
+    form.append('relative_path', file.webkitRelativePath || '');
     form.append('file', file);
     const startedAt = performance.now();
     status.hidden = false;

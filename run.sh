@@ -23,6 +23,7 @@ set +a
 
 exec .venv/bin/gunicorn \
   --workers 1 \
+  --timeout "${FILESERVER_TIMEOUT:-0}" \
   --bind "${FILESERVER_BIND:-0.0.0.0:8888}" \
   --access-logfile - \
   --error-logfile - \
