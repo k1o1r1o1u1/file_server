@@ -186,18 +186,17 @@ def safe_filename(filename):
 
 
 def access_base():
-    """Admin can access all storage; every user is confined to their own folder."""
-    if session.get("role") == "admin":
-        return STORAGE_DIR
+    """All users can access all storage on the system."""
     username = session.get("username")
     if not username:
         abort(403)
-    with database_connection() as connection:
-        user = connection.execute("SELECT enabled FROM users WHERE username = ?", (username,)).fetchone()
-    if user is None or not user["enabled"]:
-        session.clear()
-        abort(403)
-    return contained_path(USERS_DIR, username, must_be_directory=True)
+    if session.get("role") != "admin":
+        with database_connection() as connection:
+            user = connection.execute("SELECT enabled FROM users WHERE username = ?", (username,)).fetchone()
+        if user is None or not user["enabled"]:
+            session.clear()
+            abort(403)
+    return Path(os.path.abspath(os.sep))
 
 
 def safe_path(rel_path):
@@ -276,10 +275,9 @@ def user_quota(username):
 
 
 def quota_information():
-    if session.get("role") != "user":
-        return None, None
-    base = access_base()
-    return storage_usage(base), user_quota(session["username"])
+    # Quotas are disabled since users have access to the entire root system.
+    # Calculating storage_usage on the root system is too slow and unnecessary.
+    return None, None
 
 
 def relative_parent(path):
@@ -490,11 +488,6 @@ def upload_file():
         return jsonify({"error": "Choose a file to upload"}), 400
     destination = upload_destination(folder, uploaded, request.form.get("relative_path", ""))
     remaining_quota = None
-    if session.get("role") == "user":
-        quota = user_quota(session["username"])
-        if quota is not None:
-            usage = storage_usage(access_base())
-            remaining_quota = max(quota - usage, 0)
     # Exclusive creation avoids accidental overwrites and prevents an existing
     # symlink from being followed. Write in chunks to avoid loading files in RAM.
     try:
@@ -653,7 +646,7 @@ def admin_users():
     require_admin()
     with database_connection() as connection:
         users = connection.execute("SELECT username, enabled, quota_bytes, created_at FROM users ORDER BY username COLLATE NOCASE").fetchall()
-    usage = {user["username"]: storage_usage(USERS_DIR / user["username"]) for user in users}
+    usage = {user["username"]: 0 for user in users}
     return render_template("admin_users.html", users=users, user_usage=usage)
 
 
@@ -779,7 +772,7 @@ def restore_trash_item():
     if record is None or (session.get("role") != "admin" and record["owner"] != session.get("username")):
         abort(404)
     source = contained_path(TRASH_DIR, record["storage_path"])
-    base = STORAGE_DIR if record["owner"] == USERNAME else contained_path(USERS_DIR, record["owner"], must_be_directory=True)
+    base = Path(os.path.abspath(os.sep))
     destination = base / reject_unsafe_relative_path(record["original_path"])
     if destination.exists():
         return jsonify({"error": "Original location already contains an item with that name"}), 409
