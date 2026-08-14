@@ -2,42 +2,42 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Nexus File Manager</title>
+                {% if current_sort == 'name_asc' %} selected {% endif %}
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link
       rel="stylesheet"
       href="{{ url_for('static', filename='style.css') }}"
     />
     <!-- Phosphor Icons -->
-    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+                {% if current_sort == 'name_desc' %} selected {% endif %}
     <!-- QRCode.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   </head>
   <body class="fm-body">
     <nav class="navbar animate-fade-in">
       <h2>
-        <i
+                {% if current_sort == 'size_desc' %} selected {% endif %}
           class="ph-fill ph-hard-drives"
           style="color: var(--primary); font-size: 1.5rem"
         ></i>
         Nexus {% if not path %} /
         <span>{{ username if not is_admin else 'Root' }}</span> {% else %} /
         <a
-          href="{{ url_for('index') }}"
+                {% if current_sort == 'size_asc' %} selected {% endif %}
           style="color: inherit; text-decoration: none"
           class="breadcrumb-link"
           >{{ username if not is_admin else 'Root' }}</a
         >
         {% set path_parts = path.split('/') %} {% set current_accum = [] %} {%
         for part in path_parts %} {% set _ = current_accum.append(part) %} /
-        <a
+                {% if current_sort == 'date_desc' %} selected {% endif %}
           href="{{ url_for('index', path='/'.join(current_accum)) }}"
           style="color: inherit; text-decoration: none"
           class="breadcrumb-link"
           >{{ part }}</a
         >
         {% endfor %} {% endif %}
-      </h2>
+                {% if current_sort == 'date_asc' %} selected {% endif %}
 
       <div
         style="
@@ -356,103 +356,13 @@
               class="ph ph-sort-ascending"
               style="color: var(--text-muted)"
             ></i>
-            <select
-              onchange="
-                window.location.href =
-                  '?path=' +
-                  encodeURIComponent(currentPath) +
-                  '&sort=' +
-                  this.value
-              "
-              class="action-btn tool-btn"
-              style="
-                padding: 6px;
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 4px;
-                background: rgba(0, 0, 0, 0.2);
-                color: var(--text-color);
-                cursor: pointer;
-                outline: none;
-              "
-            >
-              <option
-                value="name_asc"
-                style="background: var(--bg-dark)"
-                {%
-                if
-                current_sort=""
-                ="name_asc"
-                %}selected{%
-                endif
-                %}
-              >
-                Name (A-Z)
-              </option>
-              <option
-                value="name_desc"
-                style="background: var(--bg-dark)"
-                {%
-                if
-                current_sort=""
-                ="name_desc"
-                %}selected{%
-                endif
-                %}
-              >
-                Name (Z-A)
-              </option>
-              <option
-                value="size_desc"
-                style="background: var(--bg-dark)"
-                {%
-                if
-                current_sort=""
-                ="size_desc"
-                %}selected{%
-                endif
-                %}
-              >
-                Size (Largest)
-              </option>
-              <option
-                value="size_asc"
-                style="background: var(--bg-dark)"
-                {%
-                if
-                current_sort=""
-                ="size_asc"
-                %}selected{%
-                endif
-                %}
-              >
-                Size (Smallest)
-              </option>
-              <option
-                value="date_desc"
-                style="background: var(--bg-dark)"
-                {%
-                if
-                current_sort=""
-                ="date_desc"
-                %}selected{%
-                endif
-                %}
-              >
-                Date (Newest)
-              </option>
-              <option
-                value="date_asc"
-                style="background: var(--bg-dark)"
-                {%
-                if
-                current_sort=""
-                ="date_asc"
-                %}selected{%
-                endif
-                %}
-              >
-                Date (Oldest)
-              </option>
+            <select onchange="window.location.href='?path=' + encodeURIComponent(currentPath) + '&sort=' + this.value" class="action-btn tool-btn" style="padding: 6px; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 4px; background: rgba(0, 0, 0, 0.2); color: var(--text-color); cursor: pointer; outline: none;">
+              <option value="name_asc" style="background: var(--bg-dark)" {% if current_sort == 'name_asc' %} selected {% endif %}>Name (A-Z)</option>
+              <option value="name_desc" style="background: var(--bg-dark)" {% if current_sort == 'name_desc' %} selected {% endif %}>Name (Z-A)</option>
+              <option value="size_desc" style="background: var(--bg-dark)" {% if current_sort == 'size_desc' %} selected {% endif %}>Size (Largest)</option>
+              <option value="size_asc" style="background: var(--bg-dark)" {% if current_sort == 'size_asc' %} selected {% endif %}>Size (Smallest)</option>
+              <option value="date_desc" style="background: var(--bg-dark)" {% if current_sort == 'date_desc' %} selected {% endif %}>Date (Newest)</option>
+              <option value="date_asc" style="background: var(--bg-dark)" {% if current_sort == 'date_asc' %} selected {% endif %}>Date (Oldest)</option>
             </select>
           </div>
         </div>
