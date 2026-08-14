@@ -185,7 +185,7 @@
           {% endfor %}
         </div>
       </section>
-      {% endif %} {% if is_admin and drive_usage %}
+      {% endif %} {% if is_admin and not path and drive_usage %}
       <section class="glass-panel" style="padding: 18px; margin-bottom: 16px">
         <div
           style="
@@ -435,68 +435,69 @@
               <a href="{{ url_for('index', path=parent) }}">.. (Go Up)</a>
             </div>
           </li>
-          {% endif %} {% for f in folders %}
+          {% endif %} {% for item in folders %}
           <li class="file-item">
             <div class="file-info">
               <input
                 type="checkbox"
                 class="item-checkbox"
-                value="{{f}}"
+                value="{{ item.name }}"
                 onchange="updateBatchSelection()"
                 style="margin-right: 10px"
               />
               <i class="ph-fill ph-folder icon-folder"></i>
               <a
-                href="{{ url_for('index', path=(path + '/' + f) if path else f) }}"
-                >{{f}}</a
+                href="{{ url_for('index', path=(path + '/' + item.name) if path else item.name) }}"
+                >{{ item.name }}</a
               >
             </div>
-            <div class="file-actions">
+            <div class="file-actions" style="gap: 12px;">
+              <span class="text-muted" style="font-size: 0.82rem; white-space: nowrap;">{{ item.size_label }}</span>
               <button
                 class="action-btn"
-                onclick='shareFolder({{ ((path + "/" + f) if path else f)|tojson }}, {{ f|tojson }})'
+                onclick='shareFolder({{ ((path + "/" + item.name) if path else item.name)|tojson }}, {{ item.name|tojson }})'
               >
                 <i class="ph ph-share-network"></i> Share
               </button>
               <button
                 class="action-btn"
-                onclick='protectFolder({{ ((path + "/" + f) if path else f)|tojson }}, {{ f|tojson }})'
+                onclick='protectFolder({{ ((path + "/" + item.name) if path else item.name)|tojson }}, {{ item.name|tojson }})'
               >
                 <i class="ph ph-lock-key"></i> Protect
               </button>
               <a
                 class="action-btn"
-                href="{{ url_for('download_folder_zip', path=(path + '/' + f) if path else f) }}"
+                href="{{ url_for('download_folder_zip', path=(path + '/' + item.name) if path else item.name) }}"
                 ><i class="ph ph-file-zip"></i> ZIP</a
               >
               <button
                 class="action-btn"
-                onclick='itemAction({{ f|tojson }}, "rename")'
+                onclick='itemAction({{ item.name|tojson }}, "rename")'
               >
                 Rename
               </button>
               <button
                 class="action-btn"
-                onclick='itemAction({{ f|tojson }}, "move")'
+                onclick='itemAction({{ item.name|tojson }}, "move")'
               >
                 Move
               </button>
               <button
                 class="action-btn"
-                onclick='itemAction({{ f|tojson }}, "copy")'
+                onclick='itemAction({{ item.name|tojson }}, "copy")'
               >
                 Copy
               </button>
               <button
                 class="action-btn danger-btn"
-                onclick="trashItem({{ f|tojson }})"
+                onclick="trashItem({{ item.name|tojson }})"
               >
                 Trash
               </button>
             </div>
           </li>
-          {% endfor %} {% for f in files %} {% set ext = f.rsplit('.',
-          1)[-1].lower() if '.' in f else '' %} {% set is_image = ext in ['jpg',
+          {% endfor %} {% for item in files %} {% set ext = item.name.rsplit('.',
+          1)[-1].lower() if '.' in item.name else '' %} {% set is_image = ext in ['jpg',
           'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'] %} {% set is_video = ext
           in ['mp4', 'webm'] %} {% set is_audio = ext in ['mp3', 'wav', 'ogg']
           %} {% set is_text = ext in ['txt', 'md', 'py', 'js', 'html', 'css',
@@ -508,7 +509,7 @@
               <input
                 type="checkbox"
                 class="item-checkbox"
-                value="{{f}}"
+                value="{{ item.name }}"
                 onchange="updateBatchSelection()"
                 style="margin-right: 10px"
               />
@@ -525,32 +526,33 @@
               {% else %}
               <i class="ph-duotone ph-file icon-file"></i>
               {% endif %}
-              <span>{{f}}</span>
+              <span>{{ item.name }}</span>
             </div>
             {% if is_image %}
             <div
               class="image-preview-thumb"
-              onclick='openPreview({{ url_for("view", path=path, file=f)|tojson }}, {{ f|tojson }}, {{ ext|tojson }})'
+              onclick='openPreview({{ url_for("view", path=path, file=item.name)|tojson }}, {{ item.name|tojson }}, {{ ext|tojson }})'
             >
               <img
-                src="{{ url_for('view', path=path, file=f) }}"
-                alt="{{f}}"
+                src="{{ url_for('view', path=path, file=item.name) }}"
+                alt="{{ item.name }}"
                 loading="lazy"
               />
             </div>
             {% endif %}
-            <div class="file-actions">
+            <div class="file-actions" style="gap: 12px;">
+              <span class="text-muted" style="font-size: 0.82rem; white-space: nowrap;">{{ item.size_label }}</span>
               {% if is_previewable %}
               <button
                 class="action-btn"
-                onclick='openPreview({{ url_for("view", path=path, file=f)|tojson }}, {{ f|tojson }}, {{ ext|tojson }})'
+                onclick='openPreview({{ url_for("view", path=path, file=item.name)|tojson }}, {{ item.name|tojson }}, {{ ext|tojson }})'
               >
                 <i class="ph ph-eye"></i> Preview
               </button>
               {% else %}
               <a
                 class="action-btn"
-                href="{{ url_for('view', path=path, file=f) }}"
+                href="{{ url_for('view', path=path, file=item.name) }}"
                 target="_blank"
               >
                 <i class="ph ph-eye"></i> View
@@ -558,37 +560,37 @@
               {% endif %}
               <a
                 class="action-btn"
-                href="{{ url_for('download', path=path, file=f) }}"
+                href="{{ url_for('download', path=path, file=item.name) }}"
               >
                 <i class="ph ph-download-simple"></i> Download
               </a>
               <button
                 class="action-btn"
-                onclick='shareFolder({{ ((path + "/" + f) if path else f)|tojson }}, {{ f|tojson }})'
+                onclick='shareFolder({{ ((path + "/" + item.name) if path else item.name)|tojson }}, {{ item.name|tojson }})'
               >
                 <i class="ph ph-share-network"></i> Share
               </button>
               <button
                 class="action-btn"
-                onclick='itemAction({{ f|tojson }}, "rename")'
+                onclick='itemAction({{ item.name|tojson }}, "rename")'
               >
                 Rename
               </button>
               <button
                 class="action-btn"
-                onclick='itemAction({{ f|tojson }}, "move")'
+                onclick='itemAction({{ item.name|tojson }}, "move")'
               >
                 Move
               </button>
               <button
                 class="action-btn"
-                onclick='itemAction({{ f|tojson }}, "copy")'
+                onclick='itemAction({{ item.name|tojson }}, "copy")'
               >
                 Copy
               </button>
               <button
                 class="action-btn danger-btn"
-                onclick="trashItem({{ f|tojson }})"
+                onclick="trashItem({{ item.name|tojson }})"
               >
                 Trash
               </button>

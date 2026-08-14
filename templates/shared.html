@@ -30,17 +30,20 @@
       </li>
     {% endif %}
 
-    {% for f in folders %}
+    {% for item in folders %}
       <li class="file-item">
         <div class="file-info">
           <i class="ph-fill ph-folder icon-folder"></i>
-          <a href="{{ url_for('shared_index', token=token, path=(path + '/' + f) if path else f) }}">{{f}}</a>
+          <a href="{{ url_for('shared_index', token=token, path=(path + '/' + item.name) if path else item.name) }}">{{ item.name }}</a>
+        </div>
+        <div class="file-actions" style="gap: 12px;">
+          <span class="text-muted" style="font-size: 0.82rem; white-space: nowrap;">{{ item.size_label }}</span>
         </div>
       </li>
     {% endfor %}
 
-    {% for f in files %}
-      {% set ext = f.rsplit('.', 1)[-1].lower() if '.' in f else '' %}
+    {% for item in files %}
+      {% set ext = item.name.rsplit('.', 1)[-1].lower() if '.' in item.name else '' %}
       {% set is_image = ext in ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'] %}
       <li class="file-item {% if is_image %}file-item-image{% endif %}">
         <div class="file-info">
@@ -49,24 +52,25 @@
           {% else %}
             <i class="ph-duotone ph-file icon-file"></i>
           {% endif %}
-          <span>{{f}}</span>
+          <span>{{ item.name }}</span>
         </div>
         {% if is_image %}
-        <div class="image-preview-thumb" onclick='openPreview({{ url_for("shared_view", token=token, path=path, file=f)|tojson }}, {{ f|tojson }})'>
-          <img src="{{ url_for('shared_view', token=token, path=path, file=f) }}" alt="{{f}}" loading="lazy">
+        <div class="image-preview-thumb" onclick='openPreview({{ url_for("shared_view", token=token, path=path, file=item.name)|tojson }}, {{ item.name|tojson }})'>
+          <img src="{{ url_for('shared_view', token=token, path=path, file=item.name) }}" alt="{{ item.name }}" loading="lazy">
         </div>
         {% endif %}
-        <div class="file-actions">
+        <div class="file-actions" style="gap: 12px;">
+          <span class="text-muted" style="font-size: 0.82rem; white-space: nowrap;">{{ item.size_label }}</span>
           {% if is_image %}
-          <button class="action-btn" onclick='openPreview({{ url_for("shared_view", token=token, path=path, file=f)|tojson }}, {{ f|tojson }})'>
+          <button class="action-btn" onclick='openPreview({{ url_for("shared_view", token=token, path=path, file=item.name)|tojson }}, {{ item.name|tojson }})'>
             <i class="ph ph-eye"></i> Preview
           </button>
           {% else %}
-          <a class="action-btn" href="{{ url_for('shared_view', token=token, path=path, file=f) }}" target="_blank">
+          <a class="action-btn" href="{{ url_for('shared_view', token=token, path=path, file=item.name) }}" target="_blank">
             <i class="ph ph-eye"></i> View
           </a>
           {% endif %}
-          <a class="action-btn" href="{{ url_for('shared_download', token=token, path=path, file=f) }}">
+          <a class="action-btn" href="{{ url_for('shared_download', token=token, path=path, file=item.name) }}">
             <i class="ph ph-download-simple"></i> Download
           </a>
         </div>

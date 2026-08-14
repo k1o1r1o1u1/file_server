@@ -223,6 +223,18 @@ def shared_link(token):
     return link
 
 
+def format_size(size_bytes):
+    units = ["B", "KB", "MB", "GB", "TB", "PB"]
+    value = float(size_bytes)
+    for unit in units:
+        if value < 1024.0 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(value)} B"
+            return f"{value:.1f} {unit}"
+        value /= 1024.0
+    return f"{value:.1f} PB"
+
+
 def list_directory(directory, sort_by="name_asc"):
     folders, files = [], []
     for entry in directory.iterdir():
@@ -232,23 +244,24 @@ def list_directory(directory, sort_by="name_asc"):
             resolved.relative_to(directory)
         except (OSError, RuntimeError, ValueError):
             continue
-            
+
         try:
             stat = resolved.stat()
         except OSError:
             continue
-            
+
         item = {
             "name": entry.name,
             "size": stat.st_size,
+            "size_label": format_size(stat.st_size),
             "mtime": stat.st_mtime
         }
-        
+
         if resolved.is_dir():
             folders.append(item)
         elif resolved.is_file():
             files.append(item)
-            
+
     if sort_by == "name_desc":
         key, rev = lambda x: x["name"].lower(), True
     elif sort_by == "size_asc":
@@ -262,7 +275,7 @@ def list_directory(directory, sort_by="name_asc"):
     else: # name_asc
         key, rev = lambda x: x["name"].lower(), False
 
-    return [f["name"] for f in sorted(folders, key=key, reverse=rev)], [f["name"] for f in sorted(files, key=key, reverse=rev)]
+    return sorted(folders, key=key, reverse=rev), sorted(files, key=key, reverse=rev)
 
 
 def storage_usage(directory):
@@ -297,17 +310,30 @@ def candidate_drive_paths():
     """Return actual mounted drive directories for an admin NAS view.
 
     We intentionally skip generic system roots such as /, /mnt, /media and focus
-    on the real mounted drive directories the user actually cares about.
+    on the real mounted drive directories the user actually cares about. We also
+    exclude this application's own install directory and data folders so the NAS
+    dashboard does not show the server itself as an external drive.
     """
     roots = (Path("/mnt"), Path("/media"), Path("/run/media"), Path("/srv"))
+    app_root = APP_DIR.resolve(strict=False)
+    excluded_dirs = {
+        app_root,
+        STORAGE_DIR.resolve(strict=False),
+        USERS_DIR.resolve(strict=False),
+        TRASH_DIR.resolve(strict=False),
+    }
     candidates = []
     for root in roots:
         try:
             if not root.exists() or not root.is_dir():
                 continue
             for entry in sorted(root.iterdir(), key=lambda item: item.name.lower()):
-                if entry.is_dir() and entry.name not in {"lost+found"}:
-                    candidates.append(entry)
+                if not entry.is_dir() or entry.name in {"lost+found"}:
+                    continue
+                resolved = entry.resolve(strict=False)
+                if resolved in excluded_dirs:
+                    continue
+                candidates.append(resolved)
         except OSError:
             continue
 
@@ -315,13 +341,14 @@ def candidate_drive_paths():
     ordered = []
     for path in candidates:
         try:
-            resolved = path.resolve(strict=False)
+            if not path.is_dir():
+                continue
         except OSError:
             continue
-        if resolved in seen or not resolved.is_dir():
+        if path in seen:
             continue
-        seen.add(resolved)
-        ordered.append(resolved)
+        seen.add(path)
+        ordered.append(path)
     return ordered
 
 
@@ -471,6 +498,7 @@ def index():
     sort_by = request.args.get("sort", "name_asc")
     current_path = safe_path(rel_path)
     protected = protected_folder_record(current_path)
+    drive_usage = drive_usage_summary() if session.get("role") == "admin" and not rel_path else []
     if protected and not folder_access_allowed(current_path):
         return render_template(
             "index.html",
@@ -484,7 +512,7 @@ def index():
             quota_bytes=None,
             current_sort=sort_by,
             drive_shortcuts=admin_drive_shortcuts(),
-            drive_usage=drive_usage_summary() if session.get("role") == "admin" else [],
+            drive_usage=drive_usage,
             protected_required=True,
             protected_path=str(Path(protected["path"]).resolve(strict=False)),
         )
@@ -502,7 +530,7 @@ def index():
         quota_bytes=quota,
         current_sort=sort_by,
         drive_shortcuts=admin_drive_shortcuts(),
-        drive_usage=drive_usage_summary() if session.get("role") == "admin" else [],
+        drive_usage=drive_usage,
         protected_required=False,
         protected_path="",
     )
