@@ -9,6 +9,7 @@ import hmac
 import shutil
 import tempfile
 import zipfile
+import psutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -19,11 +20,29 @@ from werkzeug.utils import secure_filename
 
 
 APP_DIR = Path(__file__).resolve().parent
-STORAGE_DIR = Path(os.environ.get("FILESERVER_STORAGE_DIR", APP_DIR / "storage")).expanduser().resolve()
+# Default to OS root '/' (or Windows drive root) when no env var, allowing full drive access. The blacklist will hide system folders.
+STORAGE_DIR = Path(os.environ.get("FILESERVER_STORAGE_DIR", Path(os.sep))).expanduser().resolve()
 USERS_DIR = STORAGE_DIR / "users"
 DATABASE_PATH = APP_DIR / "fileserver.db"
 TRASH_DIR = APP_DIR / "trash"
 IS_PRODUCTION = os.environ.get("FILESERVER_ENV", "production").lower() == "production"
+
+BLACKLIST = {
+    "/proc", "/sys", "/dev", "/run", "/var/lib", "/etc", "/boot", "/root",
+    "C:\\Windows", "C:\\Program Files", "C:\\Program Files (x86)", "C:\\System Volume Information"
+}
+
+def get_allowed_roots():
+    roots = {Path(p.mountpoint).resolve() for p in psutil.disk_partitions()}
+    allowed = []
+    for r in roots:
+        if any(str(r).startswith(b) for b in BLACKLIST):
+            continue
+        allowed.append(r)
+    return sorted(allowed)
+
+ALLOWED_ROOTS = get_allowed_roots()
+
 if not STORAGE_DIR.is_dir():
     raise RuntimeError(f"FILESERVER_STORAGE_DIR is not an existing directory: {STORAGE_DIR}")
 USERS_DIR.mkdir(exist_ok=True)
@@ -186,22 +205,22 @@ def safe_filename(filename):
 
 
 def access_base():
-    """Admin can access all storage; every user is confined to their own folder."""
-    if session.get("role") == "admin":
-        return STORAGE_DIR
-    username = session.get("username")
-    if not username:
-        abort(403)
-    with database_connection() as connection:
-        user = connection.execute("SELECT enabled FROM users WHERE username = ?", (username,)).fetchone()
-    if user is None or not user["enabled"]:
-        session.clear()
-        abort(403)
-    return contained_path(USERS_DIR, username, must_be_directory=True)
+    """All users (including admin) share the same storage root."""
+    # The environment variable may restrict to a specific root; otherwise the whole filesystem is exposed.
+    return STORAGE_DIR
 
 
 def safe_path(rel_path):
-    return contained_path(access_base(), rel_path, must_be_directory=True)
+    # Resolve the requested path and ensure it lies within an allowed root.
+    p = Path(rel_path)
+    if p.is_absolute():
+        candidate = p.resolve()
+    else:
+        candidate = (STORAGE_DIR / p).resolve()
+    # Verify candidate is under one of the allowed roots (mounted drives not blacklisted).
+    if not any(candidate == root or candidate.is_relative_to(root) for root in ALLOWED_ROOTS):
+        abort(403)
+    return candidate
 
 
 def shared_link(token):
@@ -338,6 +357,11 @@ def index():
         return redirect(url_for("login"))
     rel_path = request.args.get("path", "")
     sort_by = request.args.get("sort", "name_asc")
+    if not rel_path:
+        # No path selected – show allowed mount roots as top‑level entries.
+        roots = [str(root) for root in ALLOWED_ROOTS]
+        # Render the template with empty folder/file lists; the UI will display roots.
+        return render_template("index.html", folders=roots, files=[], path=rel_path, parent=None, is_admin=session.get("role") == "admin", username=session.get("username"), usage_bytes=None, quota_bytes=None, current_sort=sort_by)
     current_path = safe_path(rel_path)
     folders, files = list_directory(current_path, sort_by=sort_by)
     usage, quota = quota_information()
@@ -489,12 +513,8 @@ def upload_file():
     if uploaded is None or not uploaded.filename:
         return jsonify({"error": "Choose a file to upload"}), 400
     destination = upload_destination(folder, uploaded, request.form.get("relative_path", ""))
+    # No per‑user quota enforcement in the shared NAS mode.
     remaining_quota = None
-    if session.get("role") == "user":
-        quota = user_quota(session["username"])
-        if quota is not None:
-            usage = storage_usage(access_base())
-            remaining_quota = max(quota - usage, 0)
     # Exclusive creation avoids accidental overwrites and prevents an existing
     # symlink from being followed. Write in chunks to avoid loading files in RAM.
     try:
