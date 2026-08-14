@@ -291,6 +291,37 @@ def relative_parent(path):
     return "" if str(parent) == "." else str(parent)
 
 
+def admin_drive_shortcuts():
+    """Return friendly entry points for a full-host administrator view.
+
+    Linux exposes additional disks as mounted directories rather than drive
+    letters.  Present the useful mount locations directly at the top level so
+    a personal NAS does not require browsing the entire operating-system tree.
+    """
+    if session.get("role") != "admin" or STORAGE_DIR != Path("/"):
+        return []
+
+    shortcuts = [{"name": "System files", "path": "", "detail": "/"}]
+    candidates = [(Path("/home"), "Home folders")]
+    for mount_parent in (Path("/mnt"), Path("/media"), Path("/run/media")):
+        try:
+            candidates.extend((entry, entry.name) for entry in mount_parent.iterdir() if entry.is_dir())
+        except OSError:
+            continue
+
+    seen = {""}
+    for directory, label in candidates:
+        try:
+            resolved = directory.resolve(strict=True)
+            relative = str(resolved.relative_to(STORAGE_DIR)).replace(os.sep, "/")
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if relative and relative not in seen:
+            shortcuts.append({"name": label, "path": relative, "detail": f"/{relative}"})
+            seen.add(relative)
+    return shortcuts
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -343,7 +374,7 @@ def index():
     current_path = safe_path(rel_path)
     folders, files = list_directory(current_path, sort_by=sort_by)
     usage, quota = quota_information()
-    return render_template("index.html", folders=folders, files=files, path=rel_path, parent=relative_parent(rel_path), is_admin=session.get("role") == "admin", username=session.get("username"), usage_bytes=usage, quota_bytes=quota, current_sort=sort_by)
+    return render_template("index.html", folders=folders, files=files, path=rel_path, parent=relative_parent(rel_path), is_admin=session.get("role") == "admin", username=session.get("username"), usage_bytes=usage, quota_bytes=quota, current_sort=sort_by, drive_shortcuts=admin_drive_shortcuts())
 
 
 @app.route("/search", methods=["GET"])

@@ -122,6 +122,11 @@ For drives defined in `/etc/fstab`, add `x-systemd.before=fileserver.service`
 to their mount options if they must be available when the server starts.
 Removable drives cannot be browsed until Ubuntu mounts them.
 
+When full-host mode is enabled, the administrator's top-level NAS screen shows
+shortcuts for `/home` and disks mounted below `/mnt`, `/media`, or `/run/media`.
+For example, the drive mounted at `/mnt/my-drive` appears as **my-drive**. The
+full Linux directory tree remains available through **System files**.
+
 ## Security notes
 
 The server resolves requested paths and rejects absolute paths, `..`, Windows

@@ -53,6 +53,23 @@
   </div>
   {% endif %}
 
+  {% if drive_shortcuts and not path %}
+  <section class="glass-panel" style="padding: 18px; margin-bottom: 16px;">
+    <div style="display: flex; align-items: center; gap: 9px; margin-bottom: 12px;">
+      <i class="ph-fill ph-hard-drives" style="color: var(--primary); font-size: 1.35rem;"></i>
+      <div><strong>NAS locations</strong><div class="text-muted" style="font-size: .86rem;">Mounted drives and common folders</div></div>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px;">
+      {% for shortcut in drive_shortcuts %}
+      <a href="{{ url_for('index', path=shortcut.path) }}" class="action-btn tool-btn" style="height: auto; min-height: 68px; justify-content: flex-start; text-align: left; text-decoration: none; flex-direction: column; align-items: flex-start; gap: 3px;">
+        <span><i class="ph-fill ph-{{ 'hard-drive' if shortcut.path else 'house' }}"></i> {{ shortcut.name }}</span>
+        <small style="opacity: .7;">{{ shortcut.detail }}</small>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
       <ul class="flash-messages">
