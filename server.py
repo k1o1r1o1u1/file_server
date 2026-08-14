@@ -21,12 +21,14 @@ from werkzeug.utils import secure_filename
 APP_DIR = Path(__file__).resolve().parent
 STORAGE_DIR = Path(os.environ.get("FILESERVER_STORAGE_DIR", APP_DIR / "storage")).expanduser().resolve()
 USERS_DIR = STORAGE_DIR / "users"
+DRIVES_DIR = STORAGE_DIR / "drives"
 DATABASE_PATH = APP_DIR / "fileserver.db"
 TRASH_DIR = APP_DIR / "trash"
 IS_PRODUCTION = os.environ.get("FILESERVER_ENV", "production").lower() == "production"
 if not STORAGE_DIR.is_dir():
     raise RuntimeError(f"FILESERVER_STORAGE_DIR is not an existing directory: {STORAGE_DIR}")
-USERS_DIR.mkdir(exist_ok=True)
+USERS_DIR.mkdir(parents=True, exist_ok=True)
+DRIVES_DIR.mkdir(parents=True, exist_ok=True)
 TRASH_DIR.mkdir(exist_ok=True)
 
 
@@ -191,30 +193,43 @@ def check_protection(path):
 
 
 def contained_path(base, relative_path, *, must_be_directory=False, must_be_file=False):
-    """Resolve a user path and ensure it remains under base, including symlinks."""
+    """Resolve a user path and ensure it remains under the allowed base(s).
+    `base` can be a Path (single base) or a list of Paths (user home + allowed mounts).
+    """
     relative = reject_unsafe_relative_path(relative_path)
-    base = Path(base).resolve(strict=True)
-    candidate = (base / relative).resolve(strict=False)
+    # Resolve the base(s)
+    if isinstance(base, list):
+        base_paths = [b.resolve(strict=True) for b in base]
+    else:
+        base_paths = [Path(base).resolve(strict=True)]
+    candidate = (base_paths[0].parent / relative).resolve(strict=False)  # temporary, will be re-checked
+    # Find the real resolved path
     try:
-        candidate.relative_to(base)
+        candidate = candidate.resolve(strict=True)
+    except FileNotFoundError:
+        abort(404)
+    # Verify it lies within one of the allowed bases
+    for b in base_paths:
+        try:
+            candidate.relative_to(b)
+            break
+        except ValueError:
+            continue
+    else:
+        abort(403)
+    # Additional containment check for symlinks (same as before)
+    try:
+        candidate.relative_to(base_paths[0])
     except ValueError:
         abort(403)
-
     if not candidate.exists():
         abort(404)
-    # resolve() above follows existing symlinks; this second containment check
-    # prevents a symlink inside storage from granting access outside storage.
-    resolved = candidate.resolve(strict=True)
-    try:
-        resolved.relative_to(base)
-    except ValueError:
-        abort(403)
-    if must_be_directory and not resolved.is_dir():
+    if must_be_directory and not candidate.is_dir():
         abort(404)
-    if must_be_file and not resolved.is_file():
+    if must_be_file and not candidate.is_file():
         abort(404)
-    check_protection(resolved)
-    return resolved
+    check_protection(candidate)
+    return candidate
 
 
 def safe_filename(filename):
@@ -226,18 +241,37 @@ def safe_filename(filename):
     return filename
 
 
-def access_base():
-    """All users can access all storage on the system."""
+def is_admin():
+    return session.get("role") == "admin"
+
+
+def user_home_path():
     username = session.get("username")
     if not username:
-        abort(403)
-    if session.get("role") != "admin":
-        with database_connection() as connection:
-            user = connection.execute("SELECT enabled FROM users WHERE username = ?", (username,)).fetchone()
-        if user is None or not user["enabled"]:
-            session.clear()
-            abort(403)
-    return Path(os.path.abspath(os.sep))
+        abort(401)
+    return (USERS_DIR / username).resolve()
+
+
+def allowed_mounts():
+    """Return a list of Path objects for each mount point under /mnt that should be visible to users.
+    For simplicity we expose every directory directly under /mnt as a separate drive.
+    """
+    mounts = []
+    if os.path.exists("/mnt"):
+        for p in Path("/mnt").iterdir():
+            if p.is_dir():
+                mounts.append(p.resolve())
+    return mounts
+
+
+def access_base():
+    """Return the filesystem base for the current session.
+    Admin gets full system root. Regular users get their personal home directory.
+    """
+    if is_admin():
+        return Path("/")
+    else:
+        return user_home_path()
 
 
 def safe_path(rel_path):
@@ -253,6 +287,9 @@ def shared_link(token):
 
 
 def list_directory(directory, sort_by="name_asc"):
+    """List the contents of a directory.
+    For regular users, `directory` may be their home or any allowed mount point.
+    """
     folders, files = [], []
     for entry in directory.iterdir():
         # Never list links that resolve outside the directory being exposed.
@@ -372,16 +409,36 @@ def logout():
     return redirect(url_for("login"))
 
 
-@app.route("/", methods=["GET"])
-def index():
-    if not session.get("role"):
-        return redirect(url_for("login"))
-    rel_path = request.args.get("path", "")
-    sort_by = request.args.get("sort", "name_asc")
-    current_path = safe_path(rel_path)
-    folders, files = list_directory(current_path, sort_by=sort_by)
-    usage, quota = quota_information()
-    return render_template("index.html", folders=folders, files=files, path=rel_path, parent=relative_parent(rel_path), is_admin=session.get("role") == "admin", username=session.get("username"), usage_bytes=usage, quota_bytes=quota, current_sort=sort_by)
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def index(path):
+    require_login()
+    # Determine the base(s) for this request
+    if is_admin():
+        base = Path("/")
+        # Admin can navigate anywhere, just resolve the path directly
+        target_dir = contained_path(base, path, must_be_directory=True)
+    else:
+        # Regular user: virtual root showing a home folder and all allowed mounts
+        if not path:
+            # Virtual root – present list of drives
+            drives = []
+            # Home drive (C:)
+            drives.append({"name": "C", "display": "Home", "path": ""})
+            for i, mp in enumerate(allowed_mounts(), start=1):
+                letter = chr(ord('D') + i - 1)
+                drives.append({"name": letter, "display": mp.name, "path": mp.as_posix()})
+            return render_template("index.html", drives=drives, path="", folders=[], files=[])
+        # Determine which base the path belongs to
+        # First try user home
+        home = user_home_path()
+        try:
+            target_dir = contained_path([home] + allowed_mounts(), path, must_be_directory=True)
+        except Exception as e:
+            abort(403)
+    # Normal directory listing
+    folders, files = list_directory(target_dir)
+    return render_template("index.html", path=path, folders=folders, files=files)
 
 
 @app.route("/search", methods=["GET"])
