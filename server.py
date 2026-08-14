@@ -103,6 +103,15 @@ def initialize_database():
                 remote_address TEXT NOT NULL
             )
         """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS protected_folders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                path TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
 
 
 initialize_database()
@@ -284,6 +293,89 @@ def quota_information():
     return storage_usage(base), user_quota(session["username"])
 
 
+def candidate_drive_paths():
+    """Return useful mount roots for an admin's multi-drive NAS view."""
+    candidates = [Path("/")]
+    for root in (Path("/mnt"), Path("/media"), Path("/run/media"), Path("/srv"), Path("/home")):
+        try:
+            if root.exists() and root.is_dir():
+                candidates.append(root)
+                for entry in sorted(root.iterdir(), key=lambda item: item.name.lower()):
+                    if entry.is_dir() and entry.name not in {"lost+found"}:
+                        candidates.append(entry)
+        except OSError:
+            continue
+    seen = set()
+    ordered = []
+    for path in candidates:
+        try:
+            resolved = path.resolve(strict=False)
+        except OSError:
+            continue
+        if resolved in seen or not resolved.is_dir():
+            continue
+        seen.add(resolved)
+        ordered.append(resolved)
+    return ordered
+
+
+def drive_usage_summary():
+    results = []
+    for path in candidate_drive_paths():
+        try:
+            usage = shutil.disk_usage(path)
+        except OSError:
+            continue
+        total = usage.total
+        if total <= 0:
+            continue
+        used = usage.used
+        percent = round((used / total) * 100, 1)
+        results.append({
+            "path": str(path),
+            "name": path.name or "/",
+            "used": used,
+            "free": usage.free,
+            "total": total,
+            "percent": percent,
+        })
+    return results
+
+
+def protected_folder_record(path):
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError:
+        return None
+    with database_connection() as connection:
+        rows = connection.execute("SELECT * FROM protected_folders WHERE enabled = 1").fetchall()
+    for row in rows:
+        protected = Path(row["path"]).resolve(strict=False)
+        try:
+            resolved.relative_to(protected)
+            return row
+        except ValueError:
+            continue
+    return None
+
+
+def folder_access_allowed(path):
+    if session.get("role") == "admin":
+        return True
+    row = protected_folder_record(path)
+    if row is None:
+        return True
+    access_map = session.get("folder_access", {})
+    protected_path = str(Path(row["path"]).resolve(strict=False))
+    return bool(access_map.get(protected_path))
+
+
+def require_folder_access(path):
+    if folder_access_allowed(path):
+        return True
+    abort(403)
+
+
 def relative_parent(path):
     if not path:
         return None
@@ -372,9 +464,42 @@ def index():
     rel_path = request.args.get("path", "")
     sort_by = request.args.get("sort", "name_asc")
     current_path = safe_path(rel_path)
+    protected = protected_folder_record(current_path)
+    if protected and not folder_access_allowed(current_path):
+        return render_template(
+            "index.html",
+            folders=[],
+            files=[],
+            path=rel_path,
+            parent=relative_parent(rel_path),
+            is_admin=session.get("role") == "admin",
+            username=session.get("username"),
+            usage_bytes=None,
+            quota_bytes=None,
+            current_sort=sort_by,
+            drive_shortcuts=admin_drive_shortcuts(),
+            drive_usage=drive_usage_summary() if session.get("role") == "admin" else [],
+            protected_required=True,
+            protected_path=str(Path(protected["path"]).resolve(strict=False)),
+        )
     folders, files = list_directory(current_path, sort_by=sort_by)
     usage, quota = quota_information()
-    return render_template("index.html", folders=folders, files=files, path=rel_path, parent=relative_parent(rel_path), is_admin=session.get("role") == "admin", username=session.get("username"), usage_bytes=usage, quota_bytes=quota, current_sort=sort_by, drive_shortcuts=admin_drive_shortcuts())
+    return render_template(
+        "index.html",
+        folders=folders,
+        files=files,
+        path=rel_path,
+        parent=relative_parent(rel_path),
+        is_admin=session.get("role") == "admin",
+        username=session.get("username"),
+        usage_bytes=usage,
+        quota_bytes=quota,
+        current_sort=sort_by,
+        drive_shortcuts=admin_drive_shortcuts(),
+        drive_usage=drive_usage_summary() if session.get("role") == "admin" else [],
+        protected_required=False,
+        protected_path="",
+    )
 
 
 @app.route("/search", methods=["GET"])
@@ -419,7 +544,10 @@ def authenticated_file():
     if not session.get("role"):
         return None
     folder = safe_path(request.args.get("path", ""))
-    return contained_path(folder, safe_filename(request.args.get("file")), must_be_file=True)
+    file_path = contained_path(folder, safe_filename(request.args.get("file")), must_be_file=True)
+    if not folder_access_allowed(file_path.parent):
+        abort(403)
+    return file_path
 
 
 def require_login():
@@ -498,6 +626,7 @@ def create_folder():
     require_login()
     payload = request.get_json(silent=True) or {}
     parent = safe_path(payload.get("path", ""))
+    require_folder_access(parent)
     name = payload.get("name", "").strip() if isinstance(payload.get("name"), str) else ""
     if not name or name in {".", ".."}:
         return jsonify({"error": "Enter a valid folder name"}), 400
@@ -512,6 +641,40 @@ def create_folder():
         return jsonify({"error": "Could not create folder"}), 500
     audit_event("create_folder", str(destination.relative_to(access_base())).replace(os.sep, "/"))
     return jsonify({"name": name}), 201
+
+
+@app.route("/api/folder/protect", methods=["POST"])
+def protect_folder():
+    require_admin()
+    payload = request.get_json(silent=True) or {}
+    path = safe_path(payload.get("path", ""))
+    password = payload.get("password", "")
+    if not isinstance(password, str) or len(password) < 4:
+        return jsonify({"error": "Folder password must be at least 4 characters"}), 400
+    resolved = str(path.resolve(strict=True))
+    with database_connection() as connection:
+        connection.execute(
+            "INSERT INTO protected_folders (path, password_hash, enabled) VALUES (?, ?, 1) ON CONFLICT(path) DO UPDATE SET password_hash = excluded.password_hash, enabled = 1",
+            (resolved, generate_password_hash(password)),
+        )
+    return jsonify({"path": resolved, "protected": True})
+
+
+@app.route("/api/folder/unlock", methods=["POST"])
+def unlock_folder():
+    require_login()
+    payload = request.get_json(silent=True) or {}
+    path = safe_path(payload.get("path", ""))
+    password = payload.get("password", "")
+    row = protected_folder_record(path)
+    if row is None:
+        return jsonify({"error": "Folder is not protected"}), 404
+    if not check_password_hash(row["password_hash"], password):
+        return jsonify({"error": "Incorrect folder password"}), 401
+    access_map = session.setdefault("folder_access", {})
+    access_map[str(Path(row["path"]).resolve(strict=False))] = True
+    session["folder_access"] = access_map
+    return jsonify({"unlocked": True, "path": row["path"]})
 
 
 @app.route("/api/upload", methods=["POST"])
@@ -560,6 +723,7 @@ def rename_item():
     require_login()
     payload = request.get_json(silent=True) or {}
     parent, source = item_from_request(payload)
+    require_folder_access(parent)
     new_name = payload.get("new_name", "").strip() if isinstance(payload.get("new_name"), str) else ""
     safe_filename(new_name)
     destination = parent / new_name
@@ -578,7 +742,9 @@ def move_or_copy_item():
     require_login()
     payload = request.get_json(silent=True) or {}
     parent, source = item_from_request(payload)
+    require_folder_access(parent)
     destination_parent = safe_path(payload.get("destination", ""))
+    require_folder_access(destination_parent)
     operation = payload.get("operation")
     if operation not in {"move", "copy"}:
         return jsonify({"error": "Invalid operation"}), 400

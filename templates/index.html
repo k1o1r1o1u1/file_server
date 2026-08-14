@@ -70,6 +70,43 @@
   </section>
   {% endif %}
 
+  {% if is_admin and drive_usage %}
+  <section class="glass-panel" style="padding: 18px; margin-bottom: 16px;">
+    <div style="display: flex; align-items: center; gap: 9px; margin-bottom: 14px;">
+      <i class="ph-fill ph-gauge" style="color: var(--primary); font-size: 1.35rem;"></i>
+      <div><strong>Drive usage</strong><div class="text-muted" style="font-size: .86rem;">Mounted disk capacity and usage percentage</div></div>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
+      {% for drive in drive_usage %}
+      <div class="glass-panel" style="padding: 12px; background: rgba(15, 23, 42, 0.35);">
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px;">
+          <strong>{{ drive.name }}</strong>
+          <span class="text-muted">{{ drive.percent }}%</span>
+        </div>
+        <div class="progress-track"><div class="progress-bar" style="width: {{ drive.percent }}%"></div></div>
+        <div style="display: flex; justify-content: space-between; font-size: .82rem; margin-top: 8px; color: var(--text-muted);">
+          <span>{{ (drive.used / 1024 / 1024 / 1024)|round(1) }} GB used</span>
+          <span>{{ (drive.free / 1024 / 1024 / 1024)|round(1) }} GB free</span>
+        </div>
+        <div style="font-size: .75rem; margin-top: 6px; color: var(--text-muted);">{{ drive.path }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  {% if protected_required %}
+  <div class="glass-panel" style="padding: 18px; margin-bottom: 16px;">
+    <h3>Folder protected</h3>
+    <p class="text-muted">This folder requires a password before it can be opened.</p>
+    <form id="folderUnlockForm" onsubmit="return false;">
+      <input id="folderUnlockPassword" type="password" placeholder="Folder password" required>
+      <button type="submit" onclick="unlockProtectedFolder()">Unlock folder</button>
+    </form>
+    <p id="folderUnlockStatus" class="text-muted" aria-live="polite"></p>
+  </div>
+  {% endif %}
+
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
       <ul class="flash-messages">
@@ -161,6 +198,9 @@
           <div class="file-actions">
             <button class="action-btn" onclick='shareFolder({{ ((path + "/" + f) if path else f)|tojson }}, {{ f|tojson }})'>
               <i class="ph ph-share-network"></i> Share
+            </button>
+            <button class="action-btn" onclick='protectFolder({{ ((path + "/" + f) if path else f)|tojson }}, {{ f|tojson }})'>
+              <i class="ph ph-lock-key"></i> Protect
             </button>
             <a class="action-btn" href="{{ url_for('download_folder_zip', path=(path + '/' + f) if path else f) }}"><i class="ph ph-file-zip"></i> ZIP</a>
             <button class="action-btn" onclick='itemAction({{ f|tojson }}, "rename")'>Rename</button>
@@ -379,6 +419,28 @@
 
   const currentPath = {{ path|tojson }};
 
+  async function unlockProtectedFolder() {
+    const password = document.getElementById('folderUnlockPassword').value;
+    if (!password) {
+      document.getElementById('folderUnlockStatus').textContent = 'Enter the folder password.';
+      return;
+    }
+    try {
+      const response = await fetch('/api/folder/unlock', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRF-Token': {{ csrf_token|tojson }}},
+        body: JSON.stringify({ path: currentPath, password: password })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Unlock failed');
+      }
+      window.location.reload();
+    } catch (error) {
+      document.getElementById('folderUnlockStatus').textContent = error.message;
+    }
+  }
+
   function openFolderModal() {
     document.getElementById('folderName').value = '';
     document.getElementById('folderModal').style.display = 'flex';
@@ -484,6 +546,22 @@
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || 'Request failed');
     return data;
+  }
+
+  async function protectFolder(path, name) {
+    const password = prompt(`Password for protected folder "${name}" (minimum 4 chars):`);
+    if (password === null) return;
+    if (password.trim().length < 4) {
+      alert('Password must be at least 4 characters.');
+      return;
+    }
+    try {
+      await fileApi('/api/folder/protect', { path, password });
+      alert('Folder protected successfully.');
+      location.reload();
+    } catch (error) {
+      alert(error.message);
+    }
   }
 
   async function itemAction(name, action) {
