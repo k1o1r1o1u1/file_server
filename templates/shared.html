@@ -1,115 +1,147 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Nexus File Manager - Shared Folder</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-  <!-- Phosphor Icons -->
-  <script src="https://unpkg.com/@phosphor-icons/web"></script>
-</head>
-<body class="fm-body">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Nexus File Manager - Shared Folder</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='style.css') }}"
+    />
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+  </head>
+  <body class="fm-body">
+    <nav class="navbar animate-fade-in">
+      <h2>
+        <i
+          class="ph-fill ph-hard-drives"
+          style="color: var(--primary); font-size: 1.5rem"
+        ></i>
+        Shared Folder / <span>{{ path if path else 'Root' }}</span>
+      </h2>
+    </nav>
 
-<nav class="navbar animate-fade-in">
-  <h2>
-    <i class="ph-fill ph-hard-drives" style="color: var(--primary); font-size: 1.5rem;"></i>
-    Shared Folder / <span>{{ path if path else 'Root' }}</span>
-  </h2>
-</nav>
-
-<div class="main-container animate-fade-in" style="animation-delay: 0.1s;">
-
-  <div class="glass-panel" style="padding: 10px;">
-    <ul class="file-list">
-    {% if parent is not none %}
-      <li class="file-item">
-        <div class="file-info">
-          <i class="ph ph-arrow-u-up-left" style="color: var(--text-muted);"></i>
-          <a href="{{ url_for('shared_index', token=token, path=parent) }}">.. (Go Up)</a>
-        </div>
-      </li>
-    {% endif %}
-
-    {% for item in folders %}
-      <li class="file-item">
-        <div class="file-info">
-          <i class="ph-fill ph-folder icon-folder"></i>
-          <a href="{{ url_for('shared_index', token=token, path=(path + '/' + item.name) if path else item.name) }}">{{ item.name }}</a>
-        </div>
-        <div class="file-actions" style="gap: 12px;">
-          <span class="text-muted" style="font-size: 0.82rem; white-space: nowrap;">{{ item.size_label }}</span>
-        </div>
-      </li>
-    {% endfor %}
-
-    {% for item in files %}
-      {% set ext = item.name.rsplit('.', 1)[-1].lower() if '.' in item.name else '' %}
-      {% set is_image = ext in ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'] %}
-      <li class="file-item {% if is_image %}file-item-image{% endif %}">
-        <div class="file-info">
-          {% if is_image %}
-            <i class="ph-duotone ph-image icon-image"></i>
-          {% else %}
-            <i class="ph-duotone ph-file icon-file"></i>
-          {% endif %}
-          <span>{{ item.name }}</span>
-        </div>
-        {% if is_image %}
-        <div class="image-preview-thumb" onclick='openPreview({{ url_for("shared_view", token=token, path=path, file=item.name)|tojson }}, {{ item.name|tojson }})'>
-          <img src="{{ url_for('shared_view', token=token, path=path, file=item.name) }}" alt="{{ item.name }}" loading="lazy">
-        </div>
-        {% endif %}
-        <div class="file-actions" style="gap: 12px;">
-          <span class="text-muted" style="font-size: 0.82rem; white-space: nowrap;">{{ item.size_label }}</span>
-          {% if is_image %}
-          <button class="action-btn" onclick='openPreview({{ url_for("shared_view", token=token, path=path, file=item.name)|tojson }}, {{ item.name|tojson }})'>
-            <i class="ph ph-eye"></i> Preview
-          </button>
-          {% else %}
-          <a class="action-btn" href="{{ url_for('shared_view', token=token, path=path, file=item.name) }}" target="_blank">
-            <i class="ph ph-eye"></i> View
-          </a>
-          {% endif %}
-          <a class="action-btn" href="{{ url_for('shared_download', token=token, path=path, file=item.name) }}">
-            <i class="ph ph-download-simple"></i> Download
-          </a>
-        </div>
-      </li>
-    {% endfor %}
-    </ul>
-  </div>
-
-</div>
-
-<!-- Image Preview Modal -->
-<div id="previewModal" class="modal" onclick="closePreview(event)">
-  <div class="preview-modal-content">
-    <span class="close-btn" onclick="closePreviewModal()">&times;</span>
-    <h3 id="previewFileName" class="preview-title"></h3>
-    <div class="preview-image-container">
-      <img id="previewImage" src="" alt="Preview">
+    <div class="main-container animate-fade-in" style="animation-delay: 0.1s">
+      <div class="glass-panel" style="padding: 10px">
+        <ul class="file-list">
+          {% if parent is not none %}
+          <li class="file-item">
+            <div class="file-info">
+              <i
+                class="ph ph-arrow-u-up-left"
+                style="color: var(--text-muted)"
+              ></i>
+              <a href="{{ url_for('shared_index', token=token, path=parent) }}"
+                >.. (Go Up)</a
+              >
+            </div>
+          </li>
+          {% endif %} {% for item in folders %}
+          <li class="file-item">
+            <div class="file-info">
+              <i class="ph-fill ph-folder icon-folder"></i>
+              <a
+                href="{{ url_for('shared_index', token=token, path=(path + '/' + item.name) if path else item.name) }}"
+                >{{ item.name }}</a
+              >
+            </div>
+            <div class="file-actions" style="gap: 12px">
+              <span
+                class="text-muted"
+                style="font-size: 0.82rem; white-space: nowrap"
+                >{{ item.size_label }}</span
+              >
+            </div>
+          </li>
+          {% endfor %} {% for item in files %} {% set ext =
+          item.name.rsplit('.', 1)[-1].lower() if '.' in item.name else '' %} {%
+          set is_image = ext in ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp',
+          'svg'] %}
+          <li class="file-item {% if is_image %}file-item-image{% endif %}">
+            <div class="file-info">
+              {% if is_image %}
+              <i class="ph-duotone ph-image icon-image"></i>
+              {% else %}
+              <i class="ph-duotone ph-file icon-file"></i>
+              {% endif %}
+              <span>{{ item.name }}</span>
+            </div>
+            {% if is_image %}
+            <div
+              class="image-preview-thumb"
+              onclick='openPreview({{ url_for("shared_view", token=token, path=path, file=item.name)|tojson }}, {{ item.name|tojson }})'
+            >
+              <img
+                src="{{ url_for('shared_view', token=token, path=path, file=item.name) }}"
+                alt="{{ item.name }}"
+                loading="lazy"
+              />
+            </div>
+            {% endif %}
+            <div class="file-actions" style="gap: 12px">
+              <span
+                class="text-muted"
+                style="font-size: 0.82rem; white-space: nowrap"
+                >{{ item.size_label }}</span
+              >
+              {% if is_image %}
+              <button
+                class="action-btn"
+                onclick='openPreview({{ url_for("shared_view", token=token, path=path, file=item.name)|tojson }}, {{ item.name|tojson }})'
+              >
+                <i class="ph ph-eye"></i> Preview
+              </button>
+              {% else %}
+              <a
+                class="action-btn"
+                href="{{ url_for('shared_view', token=token, path=path, file=item.name) }}"
+                target="_blank"
+              >
+                <i class="ph ph-eye"></i> View
+              </a>
+              {% endif %}
+              <a
+                class="action-btn"
+                href="{{ url_for('shared_download', token=token, path=path, file=item.name) }}"
+              >
+                <i class="ph ph-download-simple"></i> Download
+              </a>
+            </div>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
     </div>
-  </div>
-</div>
 
-<script>
-  function openPreview(src, name) {
-    document.getElementById('previewImage').src = src;
-    document.getElementById('previewFileName').innerText = name;
-    document.getElementById('previewModal').style.display = 'flex';
-  }
+    <!-- Image Preview Modal -->
+    <div id="previewModal" class="modal" onclick="closePreview(event)">
+      <div class="preview-modal-content">
+        <span class="close-btn" onclick="closePreviewModal()">&times;</span>
+        <h3 id="previewFileName" class="preview-title"></h3>
+        <div class="preview-image-container">
+          <img id="previewImage" src="" alt="Preview" />
+        </div>
+      </div>
+    </div>
 
-  function closePreviewModal() {
-    document.getElementById('previewModal').style.display = 'none';
-    document.getElementById('previewImage').src = '';
-  }
+    <script>
+      function openPreview(src, name) {
+        document.getElementById("previewImage").src = src;
+        document.getElementById("previewFileName").innerText = name;
+        document.getElementById("previewModal").style.display = "flex";
+      }
 
-  function closePreview(event) {
-    if (event.target === document.getElementById('previewModal')) {
-      closePreviewModal();
-    }
-  }
-</script>
+      function closePreviewModal() {
+        document.getElementById("previewModal").style.display = "none";
+        document.getElementById("previewImage").src = "";
+      }
 
-</body>
+      function closePreview(event) {
+        if (event.target === document.getElementById("previewModal")) {
+          closePreviewModal();
+        }
+      }
+    </script>
+  </body>
 </html>

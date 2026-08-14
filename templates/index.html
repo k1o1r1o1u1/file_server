@@ -78,21 +78,6 @@
       </div>
 
       <div class="nav-actions">
-        {% if is_admin %}<a
-          class="btn-logout"
-          href="{{ url_for('admin_users') }}"
-          ><i class="ph ph-users"></i> Users</a
-        ><a class="btn-logout" href="{{ url_for('admin_logs') }}"
-          ><i class="ph ph-list-checks"></i> Logs</a
-        >{% endif %}
-        <a class="btn-logout" href="{{ url_for('user_trash') }}"
-          ><i class="ph ph-trash"></i> Trash</a
-        >
-        {% if not is_admin %}<a
-          class="btn-logout"
-          href="{{ url_for('account_settings') }}"
-          ><i class="ph ph-gear"></i> Account</a
-        >{% endif %}
         <form
           method="post"
           action="{{ url_for('logout') }}"
@@ -474,18 +459,6 @@
             </div>
             <div class="file-actions" style="gap: 12px;">
               <span class="text-muted" style="font-size: 0.82rem; white-space: nowrap;">{{ item.size_label }}</span>
-              <button
-                class="action-btn"
-                onclick='shareFolder({{ ((path + "/" + item.name) if path else item.name)|tojson }}, {{ item.name|tojson }})'
-              >
-                <i class="ph ph-share-network"></i> Share
-              </button>
-              <button
-                class="action-btn"
-                onclick='protectFolder({{ ((path + "/" + item.name) if path else item.name)|tojson }}, {{ item.name|tojson }})'
-              >
-                <i class="ph ph-lock-key"></i> Protect
-              </button>
               <a
                 class="action-btn"
                 href="{{ url_for('download_folder_zip', path=(path + '/' + item.name) if path else item.name) }}"
@@ -585,12 +558,6 @@
               >
                 <i class="ph ph-download-simple"></i> Download
               </a>
-              <button
-                class="action-btn"
-                onclick='shareFolder({{ ((path + "/" + item.name) if path else item.name)|tojson }}, {{ item.name|tojson }})'
-              >
-                <i class="ph ph-share-network"></i> Share
-              </button>
               <button
                 class="action-btn"
                 onclick='itemAction({{ item.name|tojson }}, "rename")'
