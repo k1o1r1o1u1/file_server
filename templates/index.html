@@ -185,27 +185,40 @@
           {% endfor %}
         </div>
       </section>
-      {% endif %} {% if is_admin and not path and drive_usage %}
+      {% endif %} {% if is_admin and not path %}
       <section class="glass-panel" style="padding: 18px; margin-bottom: 16px">
         <div
           style="
             display: flex;
             align-items: center;
-            gap: 9px;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
             margin-bottom: 14px;
           "
         >
-          <i
-            class="ph-fill ph-gauge"
-            style="color: var(--primary); font-size: 1.35rem"
-          ></i>
-          <div>
-            <strong>Drive usage</strong>
-            <div class="text-muted" style="font-size: 0.86rem">
-              Mounted disk capacity and usage percentage
+          <div style="display: flex; align-items: center; gap: 9px;">
+            <i
+              class="ph-fill ph-gauge"
+              style="color: var(--primary); font-size: 1.35rem"
+            ></i>
+            <div>
+              <strong>Drive usage</strong>
+              <div class="text-muted" style="font-size: 0.86rem">
+                Mounted disk capacity and usage percentage
+              </div>
             </div>
           </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button class="action-btn tool-btn" type="button" onclick="findNewDrives()">
+              <i class="ph ph-magnifying-glass"></i> Find drives
+            </button>
+            <button class="action-btn tool-btn" type="button" onclick="mountDrive()">
+              <i class="ph ph-plus"></i> Mount drive
+            </button>
+          </div>
         </div>
+        {% if drive_usage %}
         <div
           style="
             display: grid;
@@ -261,9 +274,17 @@
             >
               {{ drive.path }}
             </div>
+            <div style="margin-top: 10px; display: flex; justify-content: flex-end;">
+              <button class="action-btn" type="button" onclick="renameDrive({{ drive.path|tojson }}, {{ drive.name|tojson }})">
+                <i class="ph ph-pencil-simple"></i> Rename
+              </button>
+            </div>
           </div>
           {% endfor %}
         </div>
+        {% else %}
+        <div class="text-muted" style="padding-top: 8px;">No mounted drives found yet. Use “Find drives” or “Mount drive”.</div>
+        {% endif %}
       </section>
       {% endif %} {% if protected_required %}
       <div class="glass-panel" style="padding: 18px; margin-bottom: 16px">
@@ -944,6 +965,57 @@
         try {
           await fileApi('/api/folder/protect', { path, password });
           alert('Folder protected successfully.');
+          location.reload();
+        } catch (error) {
+          alert(error.message);
+        }
+      }
+
+      async function findNewDrives() {
+        try {
+          const response = await fetch('/api/drives/discover', {headers: {'X-CSRF-Token': {{ csrf_token|tojson }}}});
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || 'Could not discover drives');
+          if (!data.drives || data.drives.length === 0) {
+            alert('No mounted drives were detected.');
+            return;
+          }
+          const summary = data.drives.map(d => `${d.name} — ${d.path}`).join('\n');
+          alert('Detected drives:\n\n' + summary);
+          location.reload();
+        } catch (error) {
+          alert(error.message);
+        }
+      }
+
+      async function mountDrive() {
+        const path = prompt('Drive path to mount (example: /mnt/SSD or /media/usb):', '');
+        if (path === null) return;
+        const name = prompt('Display name for this drive:', path.split('/').filter(Boolean).slice(-1)[0] || 'New Drive');
+        if (name === null) return;
+        try {
+          const response = await fetch('/api/drives/mount', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': {{ csrf_token|tojson }}}, body: JSON.stringify({path, name})});
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || 'Could not mount drive');
+          alert(`Mounted ${data.name} at ${data.path}`);
+          location.reload();
+        } catch (error) {
+          alert(error.message);
+        }
+      }
+
+      async function renameDrive(path, currentName) {
+        const newName = prompt(`Rename drive "${currentName}" to:`, currentName);
+        if (newName === null) return;
+        if (!newName.trim()) {
+          alert('Drive name cannot be empty.');
+          return;
+        }
+        try {
+          const response = await fetch('/api/drives/rename', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': {{ csrf_token|tojson }}}, body: JSON.stringify({path, new_name: newName.trim()})});
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || 'Could not rename drive');
+          alert(`Renamed ${data.path} to ${data.name}`);
           location.reload();
         } catch (error) {
           alert(error.message);

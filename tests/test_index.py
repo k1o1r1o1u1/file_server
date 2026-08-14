@@ -10,7 +10,7 @@ os.environ['FILESERVER_STORAGE_DIR'] = r'E:\projects\server_sharing\storage'
 os.environ['FILESERVER_USERS_DIR'] = r'E:\projects\server_sharing\users'
 
 try:
-    from server import app, list_directory
+    from server import app, list_directory, drive_label
     app.testing = True
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -20,15 +20,19 @@ try:
         items = list_directory(base)
         assert items[0] and items[1], 'directory listing should include folder and file entries'
         assert all('name' in item and 'size' in item for item in items[0] + items[1]), 'entries must carry size metadata'
+        assert drive_label(base) == base.name, 'unaliased drive should fall back to its folder name'
 
-    client = app.test_client()
-    with client.session_transaction() as sess:
-        sess['role'] = 'admin'
-        sess['username'] = 'admin'
-    resp = client.get('/')
-    print('STATUS', resp.status_code)
-    data = resp.data.decode('utf-8', errors='replace')
-    print(data[:4000])
+        client = app.test_client()
+        with client.session_transaction() as sess:
+            sess['role'] = 'admin'
+            sess['username'] = 'admin'
+            sess['csrf_token'] = 'test-csrf-token'
+        mount_resp = client.post('/api/drives/mount', json={'path': str(base), 'name': 'Main NAS Drive'}, headers={'X-CSRF-Token': 'test-csrf-token'})
+        assert mount_resp.status_code == 200, 'mount API should accept a valid drive path'
+        resp = client.get('/')
+        print('STATUS', resp.status_code)
+        data = resp.data.decode('utf-8', errors='replace')
+        print(data[:4000])
 except Exception:
     traceback.print_exc()
     raise

@@ -112,6 +112,15 @@ def initialize_database():
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS drive_mounts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                path TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
 
 
 initialize_database()
@@ -352,6 +361,18 @@ def candidate_drive_paths():
     return ordered
 
 
+def drive_label(path):
+    resolved = Path(path).resolve(strict=False)
+    with database_connection() as connection:
+        row = connection.execute(
+            "SELECT name FROM drive_mounts WHERE path = ? AND enabled = 1",
+            (str(resolved),),
+        ).fetchone()
+    if row:
+        return row["name"]
+    return resolved.name or "/"
+
+
 def drive_usage_summary():
     results = []
     for path in candidate_drive_paths():
@@ -366,7 +387,7 @@ def drive_usage_summary():
         percent = round((used / total) * 100, 1)
         results.append({
             "path": str(path),
-            "name": path.name or "/",
+            "name": drive_label(path),
             "used": used,
             "free": usage.free,
             "total": total,
@@ -750,6 +771,76 @@ def item_from_request(payload):
     parent = safe_path(payload.get("path", ""))
     name = safe_filename(payload.get("name"))
     return parent, contained_path(parent, name)
+
+
+@app.route("/api/drives/discover", methods=["GET"])
+def discover_drives():
+    require_admin()
+    drives = []
+    for path in candidate_drive_paths():
+        try:
+            usage = shutil.disk_usage(path)
+        except OSError:
+            continue
+        drives.append({
+            "path": str(path),
+            "name": drive_label(path),
+            "total": usage.total,
+            "used": usage.used,
+            "free": usage.free,
+            "percent": round((usage.used / usage.total) * 100, 1) if usage.total else 0,
+        })
+    return jsonify({"drives": drives})
+
+
+@app.route("/api/drives/mount", methods=["POST"])
+def mount_drive():
+    require_admin()
+    payload = request.get_json(silent=True) or {}
+    raw_path = payload.get("path", "").strip()
+    raw_name = payload.get("name", "").strip()
+    if not raw_path:
+        return jsonify({"error": "A drive path is required"}), 400
+    try:
+        candidate = Path(raw_path).expanduser().resolve(strict=True)
+    except OSError:
+        return jsonify({"error": "The selected drive path does not exist"}), 404
+    if not candidate.is_dir():
+        return jsonify({"error": "The selected path is not a directory"}), 400
+    name = raw_name or candidate.name or "/"
+    safe_filename(name)
+    with database_connection() as connection:
+        connection.execute(
+            "INSERT INTO drive_mounts (path, name, enabled) VALUES (?, ?, 1) ON CONFLICT(path) DO UPDATE SET name = excluded.name, enabled = 1",
+            (str(candidate), name),
+        )
+    return jsonify({"path": str(candidate), "name": name})
+
+
+@app.route("/api/drives/rename", methods=["POST"])
+def rename_drive():
+    require_admin()
+    payload = request.get_json(silent=True) or {}
+    raw_path = payload.get("path", "").strip()
+    new_name = payload.get("new_name", "").strip()
+    if not raw_path or not new_name:
+        return jsonify({"error": "Drive path and a new name are required"}), 400
+    try:
+        candidate = Path(raw_path).expanduser().resolve(strict=True)
+    except OSError:
+        return jsonify({"error": "Drive path not found"}), 404
+    safe_filename(new_name)
+    with database_connection() as connection:
+        rowcount = connection.execute(
+            "UPDATE drive_mounts SET name = ? WHERE path = ?",
+            (new_name, str(candidate)),
+        ).rowcount
+    if rowcount == 0:
+        connection.execute(
+            "INSERT INTO drive_mounts (path, name, enabled) VALUES (?, ?, 1)",
+            (str(candidate), new_name),
+        )
+    return jsonify({"path": str(candidate), "name": new_name})
 
 
 @app.route("/api/rename", methods=["POST"])
