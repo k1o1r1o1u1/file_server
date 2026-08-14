@@ -1,11 +1,25 @@
 # Ubuntu deployment
 
-This application serves **only** `FILESERVER_STORAGE_DIR` (by default, the
-project's `storage/` directory). Keep application code, `.env`, `.venv`, and
-the Git repository outside that directory. Shared links are intentionally
+This application serves `FILESERVER_STORAGE_DIR` (by default, the project's
+`storage/` directory). Keep application code, `.env`, `.venv`, and the Git
+repository outside that directory. Shared links are intentionally
 unauthenticated: anyone who has a link can browse and download the selected
 directory until Gunicorn restarts. Links are held in memory and do not survive
 a restart.
+
+## Full-host mode (all local drives and folders)
+
+To let the administrator browse all locally mounted Ubuntu filesystems, set
+`FILESERVER_STORAGE_DIR=/`. This includes standard mount points such as
+`/mnt`, `/media`, and filesystem mounts below `/srv`; a drive must be mounted
+by Ubuntu before it can be browsed. Use the dedicated root-owned systemd unit
+in `deployment/fileserver-full-host.service`.
+
+This is remote root file-manager access: a logged-in administrator can read,
+upload, rename, move, and delete every file that root can access. Use it only
+on a trusted private LAN or VPN, never port-forward it, and use a strong unique
+administrator password and secret. Ordinary application accounts remain
+confined to `FILESERVER_USERS_DIR`, not `/users`.
 
 ## Install
 
@@ -33,8 +47,10 @@ python3 -c "from werkzeug.security import generate_password_hash; import getpass
 
 Set the generated values as `SECRET_KEY` and `FILESERVER_PASSWORD_HASH`, set
 `FILESERVER_USERNAME`, and set `FILESERVER_STORAGE_DIR` to the absolute storage
-directory (for example `/home/YOUR_USER/file-server/storage`). `FILESERVER_ENV`
-must remain `production`. Do not use the old example password/hash.
+directory (for example `/home/YOUR_USER/file-server/storage`). Also set
+`FILESERVER_USERS_DIR=/home/YOUR_USER/file-server/users`.
+`FILESERVER_ENV` must remain `production`. Do not use the old example
+password/hash.
 
 ## Test locally
 
@@ -84,11 +100,35 @@ uses one Gunicorn worker for the low-resource host. After changing `.env` or
 the service file, run `sudo systemctl daemon-reload` (for service changes) and
 `sudo systemctl restart fileserver`.
 
+### Enable full-host mode at boot
+
+Replace `.env` with the full-host settings, substituting the project path and
+generated credentials. Then install the dedicated unit. It starts after local
+filesystems are mounted and is enabled for normal server boot.
+
+```bash
+cd /home/YOUR_USER/file-server
+cp .env.full-host.example .env
+nano .env
+chmod 600 .env
+sudo cp deployment/fileserver-full-host.service /etc/systemd/system/fileserver.service
+sudo sed -i 's|/path/to/file-server|/home/YOUR_USER/file-server|g' /etc/systemd/system/fileserver.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now fileserver
+sudo systemctl status fileserver
+```
+
+For drives defined in `/etc/fstab`, add `x-systemd.before=fileserver.service`
+to their mount options if they must be available when the server starts.
+Removable drives cannot be browsed until Ubuntu mounts them.
+
 ## Security notes
 
 The server resolves requested paths and rejects absolute paths, `..`, Windows
 separators, and symlinks that escape the exposed directory. Put only intended
-files in `storage/`; filesystem permissions still apply. `FILESERVER_SECURE_COOKIES`
+files in `storage/`; filesystem permissions still apply. In full-host mode the
+exposed directory is `/` and the root service account has broad access.
+`FILESERVER_SECURE_COOKIES`
 should be changed to `true` only when clients access the application through
 HTTPS; it must remain `false` for direct HTTP testing on localhost.
 

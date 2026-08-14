@@ -5,6 +5,8 @@ After=network.target
 [Service]
 Type=simple
 # Replace these two placeholders with the normal Ubuntu account and project path.
+# This unit is for the safer, limited-storage deployment. For full-host access,
+# install deployment/fileserver-full-host.service instead.
 User=YOUR_USER
 WorkingDirectory=/path/to/file-server
 EnvironmentFile=/path/to/file-server/.env

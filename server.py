@@ -20,13 +20,15 @@ from werkzeug.utils import secure_filename
 
 APP_DIR = Path(__file__).resolve().parent
 STORAGE_DIR = Path(os.environ.get("FILESERVER_STORAGE_DIR", APP_DIR / "storage")).expanduser().resolve()
-USERS_DIR = STORAGE_DIR / "users"
+# Keep ordinary-user folders separate from the administrator's exposed tree.
+# In full-host mode (FILESERVER_STORAGE_DIR=/), this avoids creating /users.
+USERS_DIR = Path(os.environ.get("FILESERVER_USERS_DIR", APP_DIR / "users")).expanduser().resolve()
 DATABASE_PATH = APP_DIR / "fileserver.db"
 TRASH_DIR = APP_DIR / "trash"
 IS_PRODUCTION = os.environ.get("FILESERVER_ENV", "production").lower() == "production"
 if not STORAGE_DIR.is_dir():
     raise RuntimeError(f"FILESERVER_STORAGE_DIR is not an existing directory: {STORAGE_DIR}")
-USERS_DIR.mkdir(exist_ok=True)
+USERS_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
 TRASH_DIR.mkdir(exist_ok=True)
 
 
@@ -186,7 +188,7 @@ def safe_filename(filename):
 
 
 def access_base():
-    """Admin can access all storage; every user is confined to their own folder."""
+    """Admins use the configured host tree; users stay in their private tree."""
     if session.get("role") == "admin":
         return STORAGE_DIR
     username = session.get("username")
