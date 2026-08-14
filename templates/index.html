@@ -2,42 +2,39 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-                {% if current_sort == 'name_asc' %} selected {% endif %}
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link
       rel="stylesheet"
       href="{{ url_for('static', filename='style.css') }}"
     />
     <!-- Phosphor Icons -->
-                {% if current_sort == 'name_desc' %} selected {% endif %}
     <!-- QRCode.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   </head>
   <body class="fm-body">
     <nav class="navbar animate-fade-in">
       <h2>
-                {% if current_sort == 'size_desc' %} selected {% endif %}
+        <i
           class="ph-fill ph-hard-drives"
           style="color: var(--primary); font-size: 1.5rem"
         ></i>
         Nexus {% if not path %} /
         <span>{{ username if not is_admin else 'Root' }}</span> {% else %} /
         <a
-                {% if current_sort == 'size_asc' %} selected {% endif %}
+          href="{{ url_for('index') }}"
           style="color: inherit; text-decoration: none"
           class="breadcrumb-link"
           >{{ username if not is_admin else 'Root' }}</a
         >
         {% set path_parts = path.split('/') %} {% set current_accum = [] %} {%
         for part in path_parts %} {% set _ = current_accum.append(part) %} /
-                {% if current_sort == 'date_desc' %} selected {% endif %}
+        <a
           href="{{ url_for('index', path='/'.join(current_accum)) }}"
           style="color: inherit; text-decoration: none"
           class="breadcrumb-link"
           >{{ part }}</a
         >
         {% endfor %} {% endif %}
-                {% if current_sort == 'date_asc' %} selected {% endif %}
 
       <div
         style="
