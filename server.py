@@ -294,17 +294,23 @@ def quota_information():
 
 
 def candidate_drive_paths():
-    """Return useful mount roots for an admin's multi-drive NAS view."""
-    candidates = [Path("/")]
-    for root in (Path("/mnt"), Path("/media"), Path("/run/media"), Path("/srv"), Path("/home")):
+    """Return actual mounted drive directories for an admin NAS view.
+
+    We intentionally skip generic system roots such as /, /mnt, /media and focus
+    on the real mounted drive directories the user actually cares about.
+    """
+    roots = (Path("/mnt"), Path("/media"), Path("/run/media"), Path("/srv"))
+    candidates = []
+    for root in roots:
         try:
-            if root.exists() and root.is_dir():
-                candidates.append(root)
-                for entry in sorted(root.iterdir(), key=lambda item: item.name.lower()):
-                    if entry.is_dir() and entry.name not in {"lost+found"}:
-                        candidates.append(entry)
+            if not root.exists() or not root.is_dir():
+                continue
+            for entry in sorted(root.iterdir(), key=lambda item: item.name.lower()):
+                if entry.is_dir() and entry.name not in {"lost+found"}:
+                    candidates.append(entry)
         except OSError:
             continue
+
     seen = set()
     ordered = []
     for path in candidates:
