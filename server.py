@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from flask import Flask, abort, flash, jsonify, redirect, render_template, request, send_file, session, url_for
-from werkzeug.exceptions import HTTPException
+from werkzeug.exceptions import HTTPException, Unauthorized
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
@@ -57,6 +57,15 @@ app.config.update(
 )
 app.logger.info("File server initialized")
 
+class FolderLocked(Unauthorized):
+    pass
+
+@app.errorhandler(FolderLocked)
+def handle_folder_locked(e):
+    if request.path.startswith("/api/") or request.headers.get("Accept", "").find("application/json") != -1:
+        return jsonify({"error": "Folder is password protected"}), 401
+    return render_template("unlock.html", path=request.args.get("path", ""))
+
 USERNAME = required_environment("FILESERVER_USERNAME")
 PASSWORD_HASH = required_environment("FILESERVER_PASSWORD_HASH")
 
@@ -99,6 +108,13 @@ def initialize_database():
                 action TEXT NOT NULL,
                 details TEXT NOT NULL,
                 remote_address TEXT NOT NULL
+            )
+        """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS protected_folders (
+                path TEXT PRIMARY KEY,
+                password_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """)
 
@@ -150,6 +166,30 @@ def reject_unsafe_relative_path(value):
     return path
 
 
+def get_protected_folders_dict():
+    with database_connection() as connection:
+        return {row["path"]: row["password_hash"] for row in connection.execute("SELECT path, password_hash FROM protected_folders").fetchall()}
+
+
+def check_protection(path):
+    """Ensure the user has unlocked the folder if it or any parent is protected."""
+    if session.get("role") == "admin":
+        return
+        
+    unlocked = session.get("unlocked_folders", [])
+    protected_folders = get_protected_folders_dict()
+    
+    current = path.resolve()
+    while True:
+        current_str = str(current).replace(os.sep, "/")
+        if current_str in protected_folders:
+            if current_str not in unlocked:
+                raise FolderLocked()
+        if current.parent == current:
+            break
+        current = current.parent
+
+
 def contained_path(base, relative_path, *, must_be_directory=False, must_be_file=False):
     """Resolve a user path and ensure it remains under base, including symlinks."""
     relative = reject_unsafe_relative_path(relative_path)
@@ -173,6 +213,7 @@ def contained_path(base, relative_path, *, must_be_directory=False, must_be_file
         abort(404)
     if must_be_file and not resolved.is_file():
         abort(404)
+    check_protection(resolved)
     return resolved
 
 
@@ -233,6 +274,7 @@ def list_directory(directory, sort_by="name_asc"):
         }
         
         if resolved.is_dir():
+            item["is_protected"] = str(resolved).replace(os.sep, "/") in get_protected_folders_dict()
             folders.append(item)
         elif resolved.is_file():
             files.append(item)
@@ -250,7 +292,7 @@ def list_directory(directory, sort_by="name_asc"):
     else: # name_asc
         key, rev = lambda x: x["name"].lower(), False
 
-    return [f["name"] for f in sorted(folders, key=key, reverse=rev)], [f["name"] for f in sorted(files, key=key, reverse=rev)]
+    return [{"name": f["name"], "is_protected": f.get("is_protected", False)} for f in sorted(folders, key=key, reverse=rev)], [f["name"] for f in sorted(files, key=key, reverse=rev)]
 
 
 def storage_usage(directory):
@@ -522,6 +564,8 @@ def rename_item():
     parent, source = item_from_request(payload)
     new_name = payload.get("new_name", "").strip() if isinstance(payload.get("new_name"), str) else ""
     safe_filename(new_name)
+    if str(source.resolve()).replace(os.sep, "/") in get_protected_folders_dict():
+        return jsonify({"error": "Cannot rename a password-protected folder"}), 400
     destination = parent / new_name
     if destination.exists():
         return jsonify({"error": "A file or folder with that name already exists"}), 409
@@ -543,6 +587,8 @@ def move_or_copy_item():
     if operation not in {"move", "copy"}:
         return jsonify({"error": "Invalid operation"}), 400
     destination = destination_parent / source.name
+    if operation == "move" and str(source.resolve()).replace(os.sep, "/") in get_protected_folders_dict():
+        return jsonify({"error": "Cannot move a password-protected folder"}), 400
     if destination.exists():
         return jsonify({"error": "Destination already contains that name"}), 409
     if source.is_dir():
@@ -615,6 +661,71 @@ def batch_trash_items():
     if count == 0 and names:
         return jsonify({"error": "Could not trash items"}), 500
     return jsonify({"trashed": count})
+
+@app.route("/api/folder/protect", methods=["POST"])
+def protect_folder():
+    require_login()
+    payload = request.get_json(silent=True) or {}
+    parent = safe_path(payload.get("path", ""))
+    name = safe_filename(payload.get("name"))
+    folder = contained_path(parent, name, must_be_directory=True)
+    password = payload.get("password", "")
+    if not password or len(password) < 4:
+        return jsonify({"error": "Password must be at least 4 characters"}), 400
+    
+    folder_path_str = str(folder.resolve()).replace(os.sep, "/")
+    with database_connection() as connection:
+        connection.execute("INSERT OR REPLACE INTO protected_folders (path, password_hash) VALUES (?, ?)", (folder_path_str, generate_password_hash(password)))
+    return jsonify({"protected": True})
+
+@app.route("/api/folder/unprotect", methods=["POST"])
+def unprotect_folder():
+    require_login()
+    payload = request.get_json(silent=True) or {}
+    parent = safe_path(payload.get("path", ""))
+    name = safe_filename(payload.get("name"))
+    # We must allow unprotecting without fully checking protection first if they have the right password
+    folder = (parent / name).resolve()
+    password = payload.get("password", "")
+    
+    folder_path_str = str(folder).replace(os.sep, "/")
+    with database_connection() as connection:
+        record = connection.execute("SELECT password_hash FROM protected_folders WHERE path = ?", (folder_path_str,)).fetchone()
+        if not record or not check_password_hash(record["password_hash"], password):
+            return jsonify({"error": "Incorrect password or folder not protected"}), 403
+        connection.execute("DELETE FROM protected_folders WHERE path = ?", (folder_path_str,))
+    
+    if "unlocked_folders" in session and folder_path_str in session["unlocked_folders"]:
+        session["unlocked_folders"].remove(folder_path_str)
+        session.modified = True
+    return jsonify({"unprotected": True})
+
+@app.route("/api/folder/unlock", methods=["POST"])
+def unlock_folder():
+    require_login()
+    payload = request.get_json(silent=True) or {}
+    # Use raw string path because safe_path would block if it's protected
+    raw_path = payload.get("path", "")
+    try:
+        folder = Path(reject_unsafe_relative_path(raw_path)).resolve()
+    except Exception:
+        return jsonify({"error": "Invalid path"}), 400
+        
+    password = payload.get("password", "")
+    folder_path_str = str(folder).replace(os.sep, "/")
+    
+    with database_connection() as connection:
+        record = connection.execute("SELECT password_hash FROM protected_folders WHERE path = ?", (folder_path_str,)).fetchone()
+        if not record or not check_password_hash(record["password_hash"], password):
+            return jsonify({"error": "Incorrect password"}), 403
+            
+    if "unlocked_folders" not in session:
+        session["unlocked_folders"] = []
+    if folder_path_str not in session["unlocked_folders"]:
+        session["unlocked_folders"].append(folder_path_str)
+        session.modified = True
+        
+    return jsonify({"unlocked": True})
 
 
 @app.route("/zip")

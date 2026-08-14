@@ -134,14 +134,23 @@
         </li>
       {% endif %}
   
-      {% for f in folders %}
+      {% for folder in folders %}
+        {% set f = folder.name %}
         <li class="file-item">
           <div class="file-info">
             <input type="checkbox" class="item-checkbox" value="{{f}}" onchange="updateBatchSelection()" style="margin-right: 10px;">
             <i class="ph-fill ph-folder icon-folder"></i>
+            {% if folder.is_protected %}
+              <i class="ph-fill ph-lock" style="color: var(--primary); margin-left: 5px; font-size: 1.2rem;"></i>
+            {% endif %}
             <a href="{{ url_for('index', path=(path + '/' + f) if path else f) }}">{{f}}</a>
           </div>
           <div class="file-actions">
+            {% if not folder.is_protected %}
+            <button class="action-btn" onclick='protectFolder({{ f|tojson }})'>Protect</button>
+            {% else %}
+            <button class="action-btn" onclick='unprotectFolder({{ f|tojson }})'>Unprotect</button>
+            {% endif %}
             <button class="action-btn" onclick='shareFolder({{ ((path + "/" + f) if path else f)|tojson }}, {{ f|tojson }})'>
               <i class="ph ph-share-network"></i> Share
             </button>
@@ -488,6 +497,28 @@
     if (!confirm(`Move ${name} to trash?`)) return;
     try { await fileApi('/api/trash', {path: currentPath, name}); location.reload(); }
     catch (error) { alert(error.message); }
+  }
+
+  async function protectFolder(name) {
+    const password = prompt(`Set password for folder '${name}':`);
+    if (!password) return;
+    try {
+      await fileApi('/api/folder/protect', { path: currentPath, name, password });
+      location.reload();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+
+  async function unprotectFolder(name) {
+    const password = prompt(`Enter password to remove protection from '${name}':`);
+    if (!password) return;
+    try {
+      await fileApi('/api/folder/unprotect', { path: currentPath, name, password });
+      location.reload();
+    } catch (error) {
+      alert(error.message);
+    }
   }
 
   // Batch Actions
